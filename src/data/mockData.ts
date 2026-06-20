@@ -386,6 +386,7 @@ export const getLogActionLabel = (action: string): string => {
     issue_status_changed: '状态变更',
     version_uploaded: '上传修改版',
     issue_verified: '验证通过',
+    issue_rejected: '打回修改',
     chapter_status_changed: '章节状态变更',
     issue_deleted: '删除问题',
     issue_updated: '更新问题'
@@ -399,6 +400,7 @@ export const getLogActionColor = (action: string): string => {
     issue_status_changed: '#f59e0b',
     version_uploaded: '#3b82f6',
     issue_verified: '#10b981',
+    issue_rejected: '#f97316',
     chapter_status_changed: '#8b5cf6',
     issue_deleted: '#dc2626',
     issue_updated: '#64748b'

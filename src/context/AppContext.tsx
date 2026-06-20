@@ -21,6 +21,8 @@ interface AppState {
   filterIssueType: string;
   viewMode: 'dual' | 'original' | 'translated' | 'overlay';
   compareVersion: { left: number; right: number } | null;
+  overlayBaseVersion: number;
+  overlayTopVersion: number;
   overlayOpacity: number;
 }
 
@@ -35,6 +37,8 @@ type Action =
   | { type: 'SET_FILTER_ISSUE_TYPE'; payload: string }
   | { type: 'SET_VIEW_MODE'; payload: AppState['viewMode'] }
   | { type: 'SET_COMPARE_VERSION'; payload: AppState['compareVersion'] }
+  | { type: 'SET_OVERLAY_BASE_VERSION'; payload: number }
+  | { type: 'SET_OVERLAY_TOP_VERSION'; payload: number }
   | { type: 'SET_OVERLAY_OPACITY'; payload: number }
   | { type: 'ADD_ISSUE'; payload: { chapterId: string; issue: Issue } }
   | { type: 'UPDATE_ISSUE'; payload: { chapterId: string; issueId: string; updates: Partial<Issue> } }
@@ -42,6 +46,7 @@ type Action =
   | { type: 'DELETE_ISSUE'; payload: { chapterId: string; issueId: string } }
   | { type: 'ADD_ISSUE_VERSION'; payload: { chapterId: string; issueId: string; version: IssueVersion; pageIndex: number; pageVersion: PageVersion } }
   | { type: 'VERIFY_ISSUE_VERSION'; payload: { chapterId: string; issueId: string; versionIndex: number; verifiedBy: string; verifiedAt: string } }
+  | { type: 'REJECT_ISSUE_VERSION'; payload: { chapterId: string; issueId: string; versionIndex: number; rejectedBy: string; rejectedAt: string; rejectReason: string } }
   | { type: 'ADD_LOG'; payload: OperationLog }
   | { type: 'LOAD_FROM_STORAGE'; payload: { chapters: Chapter[]; logs: OperationLog[] } }
   | { type: 'NEXT_PAGE' }
@@ -86,6 +91,8 @@ const initialState: AppState = {
   filterIssueType: 'all',
   viewMode: 'dual',
   compareVersion: null,
+  overlayBaseVersion: 1,
+  overlayTopVersion: 2,
   overlayOpacity: 50,
   ...storedState
 };
@@ -131,6 +138,12 @@ function appReducer(state: AppState, action: Action): AppState {
       break;
     case 'SET_COMPARE_VERSION':
       newState = { ...state, compareVersion: action.payload };
+      break;
+    case 'SET_OVERLAY_BASE_VERSION':
+      newState = { ...state, overlayBaseVersion: action.payload };
+      break;
+    case 'SET_OVERLAY_TOP_VERSION':
+      newState = { ...state, overlayTopVersion: action.payload };
       break;
     case 'SET_OVERLAY_OPACITY':
       newState = { ...state, overlayOpacity: Math.max(0, Math.min(100, action.payload)) };
@@ -195,21 +208,21 @@ function appReducer(state: AppState, action: Action): AppState {
                   issue.id === issueId
                     ? {
                         ...issue,
-                        versions: [...issue.versions, version],
+                        versions: [...issue.versions, version].sort((a, b) => a.version - b.version),
                         currentVersion: version.version,
                         status: version.status,
                       }
                     : issue
                 ),
-                pages: ch.pages.map(page =>
-                  page.index === pageIndex
-                    ? {
-                        ...page,
-                        versions: [...page.versions, pageVersion],
-                        translatedImage: pageVersion.imageUrl
-                      }
-                    : page
-                ),
+                pages: ch.pages.map(page => {
+                  if (page.index !== pageIndex) return page;
+                  const existingVersions = page.versions.filter(v => v.version !== pageVersion.version);
+                  return {
+                    ...page,
+                    versions: [...existingVersions, pageVersion].sort((a, b) => a.version - b.version),
+                    translatedImage: pageVersion.imageUrl
+                  };
+                }),
                 updatedAt: new Date().toISOString()
               }
             : ch
@@ -227,7 +240,7 @@ function appReducer(state: AppState, action: Action): AppState {
                 ...ch,
                 issues: ch.issues.map(issue => {
                   if (issue.id !== vIssueId) return issue;
-                  const newVersions = [...issue.versions];
+                  const newVersions = [...issue.versions].sort((a, b) => a.version - b.version);
                   if (newVersions[versionIndex]) {
                     newVersions[versionIndex] = {
                       ...newVersions[versionIndex],
@@ -242,6 +255,39 @@ function appReducer(state: AppState, action: Action): AppState {
                     status: 'verified' as IssueStatus,
                     resolvedAt: verifiedAt,
                     resolvedBy: verifiedBy
+                  };
+                }),
+                updatedAt: new Date().toISOString()
+              }
+            : ch
+        )
+      };
+      break;
+    }
+    case 'REJECT_ISSUE_VERSION': {
+      const { chapterId: rChId, issueId: rIssueId, versionIndex, rejectedBy, rejectedAt, rejectReason } = action.payload;
+      newState = {
+        ...state,
+        chapters: state.chapters.map(ch =>
+          ch.id === rChId
+            ? {
+                ...ch,
+                issues: ch.issues.map(issue => {
+                  if (issue.id !== rIssueId) return issue;
+                  const newVersions = [...issue.versions].sort((a, b) => a.version - b.version);
+                  if (newVersions[versionIndex]) {
+                    newVersions[versionIndex] = {
+                      ...newVersions[versionIndex],
+                      status: 'revising' as IssueStatus,
+                      rejectedBy,
+                      rejectedAt,
+                      rejectReason
+                    };
+                  }
+                  return {
+                    ...issue,
+                    versions: newVersions,
+                    status: 'revising' as IssueStatus
                   };
                 }),
                 updatedAt: new Date().toISOString()
@@ -307,6 +353,7 @@ const AppContext = createContext<{
     note?: string
   ) => void;
   verifyIssue: (chapterId: string, issueId: string) => void;
+  rejectIssue: (chapterId: string, issueId: string, rejectReason: string) => void;
   addLog: (log: Omit<OperationLog, 'id' | 'timestamp'>) => void;
   getIssueById: (chapterId: string, issueId: string) => Issue | undefined;
 } | null>(null);
@@ -330,7 +377,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       filterStatus: state.filterStatus,
       filterIssueType: state.filterIssueType,
       viewMode: state.viewMode,
-      overlayOpacity: state.overlayOpacity
+      overlayOpacity: state.overlayOpacity,
+      overlayBaseVersion: state.overlayBaseVersion,
+      overlayTopVersion: state.overlayTopVersion,
+      compareVersion: state.compareVersion
     };
     saveToStorage(STORAGE_KEY_STATE, stateToPersist);
   }, [
@@ -340,7 +390,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     state.filterStatus,
     state.filterIssueType,
     state.viewMode,
-    state.overlayOpacity
+    state.overlayOpacity,
+    state.overlayBaseVersion,
+    state.overlayTopVersion,
+    state.compareVersion
   ]);
 
   const getSelectedChapter = () => {
@@ -493,13 +546,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const issue = getIssueById(targetChapterId, issueId);
     if (!issue) return;
 
+    const chapter = state.chapters.find(ch => ch.id === targetChapterId);
+    const page = chapter?.pages.find(p => p.index === issue.pageIndex);
+    const latestVersion = page?.versions.length ? Math.max(...page.versions.map(v => v.version)) : 1;
+
     dispatch({ type: 'SELECT_CHAPTER', payload: targetChapterId });
     setTimeout(() => {
       dispatch({ type: 'SET_PAGE', payload: issue.pageIndex });
       dispatch({ type: 'SET_ACTIVE_ISSUE', payload: issueId });
       dispatch({ type: 'SET_HIGHLIGHT_ISSUE', payload: issueId });
       if (issue.versions.length > 1) {
-        dispatch({ type: 'SET_COMPARE_VERSION', payload: { left: 1, right: issue.currentVersion } });
+        dispatch({ type: 'SET_COMPARE_VERSION', payload: { left: 1, right: latestVersion } });
       }
     }, 50);
   };
@@ -514,7 +571,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!issue) return;
 
     const now = new Date().toISOString();
-    const newVersionNum = issue.currentVersion + 1;
+    const sortedVersions = [...issue.versions].sort((a, b) => a.version - b.version);
+    const maxVersion = sortedVersions.length > 0 ? sortedVersions[sortedVersions.length - 1].version : 0;
+    const newVersionNum = maxVersion + 1;
 
     const newVersion: IssueVersion = {
       version: newVersionNum,
@@ -566,7 +625,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     const oldStatus = issue.status;
     const now = new Date().toISOString();
-    const lastVersionIndex = issue.versions.length - 1;
+    const sortedVersions = [...issue.versions].sort((a, b) => a.version - b.version);
+    const lastVersionIndex = sortedVersions.length - 1;
 
     dispatch({
       type: 'VERIFY_ISSUE_VERSION',
@@ -592,8 +652,49 @@ export function AppProvider({ children }: { children: ReactNode }) {
       details: {
         oldStatus,
         newStatus: 'verified',
-        version: issue.currentVersion,
+        version: sortedVersions[sortedVersions.length - 1]?.version,
         description: '验证通过'
+      }
+    });
+  };
+
+  const rejectIssue = (chapterId: string, issueId: string, rejectReason: string) => {
+    const issue = getIssueById(chapterId, issueId);
+    if (!issue) return;
+
+    const oldStatus = issue.status;
+    const now = new Date().toISOString();
+    const sortedVersions = [...issue.versions].sort((a, b) => a.version - b.version);
+    const lastVersionIndex = sortedVersions.length - 1;
+
+    dispatch({
+      type: 'REJECT_ISSUE_VERSION',
+      payload: {
+        chapterId,
+        issueId,
+        versionIndex: lastVersionIndex,
+        rejectedBy: state.currentUser.id,
+        rejectedAt: now,
+        rejectReason
+      }
+    });
+
+    const chapter = state.chapters.find(ch => ch.id === chapterId);
+    addLog({
+      action: 'issue_rejected',
+      userId: state.currentUser.id,
+      userName: state.currentUser.name,
+      userRole: state.currentUser.role,
+      chapterId,
+      chapterTitle: chapter?.title || '',
+      issueId,
+      pageIndex: issue.pageIndex,
+      details: {
+        oldStatus,
+        newStatus: 'revising',
+        version: sortedVersions[sortedVersions.length - 1]?.version,
+        description: rejectReason,
+        note: '打回修改'
       }
     });
   };
@@ -611,6 +712,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       jumpToIssue,
       uploadIssueVersion,
       verifyIssue,
+      rejectIssue,
       addLog,
       getIssueById
     }}>

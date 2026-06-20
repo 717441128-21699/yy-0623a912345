@@ -1,16 +1,17 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { 
   ArrowLeft, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, 
   Edit3, Eye, CheckCircle, AlertTriangle, FileText,
   Download, Upload, RotateCcw, List, Grid, X, Layers,
-  GitCompare, EyeOff
+  GitCompare, EyeOff, XCircle
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { STATUS_LABELS, ISSUE_STATUS_LABELS } from '../../types';
-import { getIssueTypeLabel } from '../../data/mockData';
+import { STATUS_LABELS, ISSUE_STATUS_LABELS, ISSUE_TYPE_CONFIGS } from '../../types';
+import { getIssueTypeLabel, getIssueTypeColor, getUserNameById } from '../../data/mockData';
 import DualImageView from './DualImageView';
 import IssuePanel from './IssuePanel';
 import IssueFormModal from './IssueFormModal';
+import RejectModal from './RejectModal';
 
 interface ReviewPageProps {
   onBack: () => void;
@@ -18,22 +19,45 @@ interface ReviewPageProps {
 }
 
 export default function ReviewPage({ onBack, highlightIssueId }: ReviewPageProps) {
-  const { state, dispatch, getSelectedChapter, getCurrentPage, getCurrentPageIssues, verifyIssue, jumpToIssue, updateChapterStatus } = useApp();
+  const { state, dispatch, getSelectedChapter, getCurrentPage, getCurrentPageIssues, verifyIssue, rejectIssue, updateChapterStatus } = useApp();
   const [showIssuePanel, setShowIssuePanel] = useState(true);
   const [showIssueForm, setShowIssueForm] = useState(false);
   const [syncScroll, setSyncScroll] = useState(true);
+  const [showRejectModal, setShowRejectModal] = useState(false);
+  const [rejectIssueId, setRejectIssueId] = useState<string | null>(null);
 
   const chapter = getSelectedChapter();
   const currentPage = getCurrentPage();
   const pageIssues = getCurrentPageIssues();
 
+  const pageVersions = useMemo(() => {
+    const sorted = [...(currentPage?.versions || [])].sort((a, b) => a.version - b.version);
+    return sorted;
+  }, [currentPage]);
+
+  const hasMultipleVersions = pageVersions.length > 1;
+  const latestVersion = pageVersions.length > 0 ? pageVersions[pageVersions.length - 1].version : 1;
+
   useEffect(() => {
     if (highlightIssueId && chapter) {
-      setTimeout(() => {
-        jumpToIssue(highlightIssueId, chapter.id);
-      }, 100);
+      const issue = chapter.issues.find(i => i.id === highlightIssueId);
+      if (issue) {
+        setTimeout(() => {
+          dispatch({ type: 'SET_PAGE', payload: issue.pageIndex });
+          dispatch({ type: 'SET_ACTIVE_ISSUE', payload: highlightIssueId });
+          dispatch({ type: 'SET_HIGHLIGHT_ISSUE', payload: highlightIssueId });
+          if (issue.versions.length > 1 && pageVersions.length > 1) {
+            dispatch({ type: 'SET_COMPARE_VERSION', payload: { left: 1, right: latestVersion } });
+          }
+        }, 50);
+      }
     }
   }, [highlightIssueId, chapter?.id]);
+
+  const getVersionImage = (versionNum: number): string => {
+    const version = pageVersions.find(v => v.version === versionNum);
+    return version?.imageUrl || currentPage?.translatedImage || '';
+  };
 
   if (!chapter) {
     return (
@@ -56,9 +80,6 @@ export default function ReviewPage({ onBack, highlightIssueId }: ReviewPageProps
   const currentPageIssues = chapter.issues.filter(
     issue => issue.pageIndex === state.currentPageIndex
   );
-
-  const pageVersions = currentPage?.versions || [];
-  const hasMultipleVersions = pageVersions.length > 1;
 
   const handlePrevPage = () => {
     dispatch({ type: 'PREV_PAGE' });
@@ -104,13 +125,60 @@ export default function ReviewPage({ onBack, highlightIssueId }: ReviewPageProps
     dispatch({ type: 'SET_VIEW_MODE', payload: mode });
   };
 
-  const handleCompareVersion = (left: number, right: number) => {
-    dispatch({ type: 'SET_COMPARE_VERSION', payload: { left, right } });
+  const handleLeftVersionChange = (version: number) => {
+    dispatch({
+      type: 'SET_COMPARE_VERSION',
+      payload: { left: version, right: state.compareVersion?.right || latestVersion }
+    });
+  };
+
+  const handleRightVersionChange = (version: number) => {
+    dispatch({
+      type: 'SET_COMPARE_VERSION',
+      payload: { left: state.compareVersion?.left || 1, right: version }
+    });
+  };
+
+  const handleCompareToggle = () => {
+    if (state.compareVersion) {
+      handleClearCompare();
+    } else {
+      dispatch({ type: 'SET_COMPARE_VERSION', payload: { left: 1, right: latestVersion } });
+    }
   };
 
   const handleClearCompare = () => {
     dispatch({ type: 'SET_COMPARE_VERSION', payload: null });
     dispatch({ type: 'SET_VIEW_MODE', payload: 'dual' });
+  };
+
+  const handleOverlayBaseChange = (version: number) => {
+    dispatch({ type: 'SET_OVERLAY_BASE_VERSION', payload: version });
+  };
+
+  const handleOverlayTopChange = (version: number) => {
+    dispatch({ type: 'SET_OVERLAY_TOP_VERSION', payload: version });
+  };
+
+  const handleVerifyActive = () => {
+    if (state.activeIssueId) {
+      verifyIssue(chapter.id, state.activeIssueId);
+    }
+  };
+
+  const handleRejectActive = () => {
+    if (state.activeIssueId) {
+      setRejectIssueId(state.activeIssueId);
+      setShowRejectModal(true);
+    }
+  };
+
+  const handleConfirmReject = (reason: string) => {
+    if (rejectIssueId) {
+      rejectIssue(chapter.id, rejectIssueId, reason);
+    }
+    setShowRejectModal(false);
+    setRejectIssueId(null);
   };
 
   const issueStats = {
@@ -121,10 +189,7 @@ export default function ReviewPage({ onBack, highlightIssueId }: ReviewPageProps
     verified: chapter.issues.filter(i => i.status === 'verified').length,
   };
 
-  const getVersionImage = (versionNum: number): string => {
-    const version = pageVersions.find(v => v.version === versionNum);
-    return version?.imageUrl || currentPage?.translatedImage || '';
-  };
+  const activeIssue = chapter.issues.find(i => i.id === state.activeIssueId);
 
   return (
     <div className="h-full flex flex-col bg-gray-100">
@@ -154,6 +219,14 @@ export default function ReviewPage({ onBack, highlightIssueId }: ReviewPageProps
                     <span className="w-1 h-1 bg-gray-300 rounded-full"></span>
                     <span className="text-primary-600 font-medium">
                       版本对比: V{state.compareVersion.left} vs V{state.compareVersion.right}
+                    </span>
+                  </>
+                )}
+                {state.viewMode === 'overlay' && (
+                  <>
+                    <span className="w-1 h-1 bg-gray-300 rounded-full"></span>
+                    <span className="text-purple-600 font-medium">
+                      叠加: V{state.overlayBaseVersion} / V{state.overlayTopVersion}
                     </span>
                   </>
                 )}
@@ -203,11 +276,7 @@ export default function ReviewPage({ onBack, highlightIssueId }: ReviewPageProps
                     <Layers className="w-4 h-4" />
                   </button>
                   <button
-                    onClick={() => {
-                      if (pageVersions.length >= 2) {
-                        handleCompareVersion(1, pageVersions[pageVersions.length - 1].version);
-                      }
-                    }}
+                    onClick={handleCompareToggle}
                     className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
                       state.compareVersion ? 'bg-primary-100 text-primary-700' : 'text-gray-600 hover:text-gray-900'
                     }`}
@@ -220,17 +289,83 @@ export default function ReviewPage({ onBack, highlightIssueId }: ReviewPageProps
             </div>
 
             {state.viewMode === 'overlay' && hasMultipleVersions && (
-              <div className="flex items-center gap-2 mr-4">
-                <span className="text-xs text-gray-500">透明度:</span>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={state.overlayOpacity}
-                  onChange={(e) => dispatch({ type: 'SET_OVERLAY_OPACITY', payload: parseInt(e.target.value) })}
-                  className="w-24 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
-                />
-                <span className="text-xs text-gray-600 w-10">{state.overlayOpacity}%</span>
+              <div className="flex items-center gap-3 mr-4 px-3 py-2 bg-purple-50 rounded-lg border border-purple-200">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-purple-600 font-medium">底层</span>
+                  <select
+                    value={state.overlayBaseVersion}
+                    onChange={(e) => handleOverlayBaseChange(parseInt(e.target.value))}
+                    className="text-xs border border-purple-300 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white"
+                  >
+                    {pageVersions.map(v => (
+                      <option key={v.version} value={v.version}>
+                        V{v.version}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="w-px h-4 bg-purple-300"></div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-purple-600 font-medium">顶层</span>
+                  <select
+                    value={state.overlayTopVersion}
+                    onChange={(e) => handleOverlayTopChange(parseInt(e.target.value))}
+                    className="text-xs border border-purple-300 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white"
+                  >
+                    {pageVersions.map(v => (
+                      <option key={v.version} value={v.version}>
+                        V{v.version}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="w-px h-4 bg-purple-300"></div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-purple-600 font-medium">不透明度</span>
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    value={state.overlayOpacity}
+                    onChange={(e) => dispatch({ type: 'SET_OVERLAY_OPACITY', payload: parseInt(e.target.value) })}
+                    className="w-20 h-1.5 bg-purple-200 rounded-lg appearance-none cursor-pointer"
+                  />
+                  <span className="text-xs text-purple-700 w-8">{state.overlayOpacity}%</span>
+                </div>
+              </div>
+            )}
+
+            {state.compareVersion && (
+              <div className="flex items-center gap-3 mr-4 px-3 py-2 bg-primary-50 rounded-lg border border-primary-200">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-gray-500">左侧</span>
+                  <select
+                    value={state.compareVersion.left}
+                    onChange={(e) => handleLeftVersionChange(parseInt(e.target.value))}
+                    className="text-sm border border-primary-300 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white"
+                  >
+                    {pageVersions.map(v => (
+                      <option key={v.version} value={v.version}>
+                        V{v.version} - {v.note || '版本'}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <GitCompare className="w-4 h-4 text-primary-400" />
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-gray-500">右侧</span>
+                  <select
+                    value={state.compareVersion.right}
+                    onChange={(e) => handleRightVersionChange(parseInt(e.target.value))}
+                    className="text-sm border border-primary-300 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white"
+                  >
+                    {pageVersions.map(v => (
+                      <option key={v.version} value={v.version}>
+                        V{v.version} - {v.note || '版本'}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
             )}
 
@@ -328,16 +463,14 @@ export default function ReviewPage({ onBack, highlightIssueId }: ReviewPageProps
               <span className="text-sm text-gray-600">同步滚动</span>
             </label>
 
-            {hasMultipleVersions && (
-              <div className="flex items-center gap-2 ml-4">
+            {hasMultipleVersions && !state.compareVersion && state.viewMode === 'dual' && (
+              <div className="flex items-center gap-2 ml-4 px-3 py-1.5 bg-gray-50 rounded-lg border border-gray-200">
                 <span className="text-xs text-gray-500">查看版本:</span>
                 <select
-                  value={state.compareVersion?.right || pageVersions[pageVersions.length - 1]?.version || 1}
+                  value={latestVersion}
                   onChange={(e) => {
                     const v = parseInt(e.target.value);
-                    if (state.compareVersion) {
-                      handleCompareVersion(state.compareVersion.left, v);
-                    }
+                    dispatch({ type: 'SET_COMPARE_VERSION', payload: { left: 1, right: v } });
                   }}
                   className="text-sm border border-gray-300 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-primary-500"
                 >
@@ -381,6 +514,25 @@ export default function ReviewPage({ onBack, highlightIssueId }: ReviewPageProps
               </button>
             )}
 
+            {activeIssue && activeIssue.status === 'resolved' && (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleRejectActive}
+                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-red-600 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 transition-colors"
+                >
+                  <XCircle className="w-4 h-4" />
+                  打回修改
+                </button>
+                <button
+                  onClick={handleVerifyActive}
+                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-green-600 bg-green-50 border border-green-200 rounded-lg hover:bg-green-100 transition-colors"
+                >
+                  <CheckCircle className="w-4 h-4" />
+                  验证通过
+                </button>
+              </div>
+            )}
+
             <button
               onClick={handleSendToRevise}
               className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg hover:bg-amber-100 transition-colors"
@@ -412,6 +564,8 @@ export default function ReviewPage({ onBack, highlightIssueId }: ReviewPageProps
             highlightIssueId={state.highlightIssueId}
             compareVersion={state.compareVersion}
             overlayOpacity={state.overlayOpacity}
+            overlayBaseVersion={state.overlayBaseVersion}
+            overlayTopVersion={state.overlayTopVersion}
             getVersionImage={getVersionImage}
           />
         </div>
@@ -466,6 +620,17 @@ export default function ReviewPage({ onBack, highlightIssueId }: ReviewPageProps
           }}
           pageIndex={state.currentPageIndex}
           chapterId={chapter.id}
+        />
+      )}
+
+      {showRejectModal && (
+        <RejectModal
+          onClose={() => {
+            setShowRejectModal(false);
+            setRejectIssueId(null);
+          }}
+          onConfirm={handleConfirmReject}
+          issueTitle={activeIssue?.description || ''}
         />
       )}
     </div>

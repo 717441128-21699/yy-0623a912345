@@ -14,6 +14,8 @@ interface DualImageViewProps {
   highlightIssueId: string | null;
   compareVersion: { left: number; right: number } | null;
   overlayOpacity: number;
+  overlayBaseVersion?: number;
+  overlayTopVersion?: number;
   getVersionImage: (version: number) => string;
 }
 
@@ -28,6 +30,8 @@ export default function DualImageView({
   highlightIssueId,
   compareVersion,
   overlayOpacity,
+  overlayBaseVersion = 1,
+  overlayTopVersion = 2,
   getVersionImage
 }: DualImageViewProps) {
   const originalRef = useRef<HTMLDivElement>(null);
@@ -112,7 +116,7 @@ export default function DualImageView({
 
   useEffect(() => {
     setImageLoaded({ original: false, translated: false });
-  }, [currentPage, compareVersion, viewMode]);
+  }, [currentPage, compareVersion, viewMode, overlayBaseVersion, overlayTopVersion]);
 
   if (!currentPage) {
     return (
@@ -227,14 +231,14 @@ export default function DualImageView({
   };
 
   const OverlayView = () => {
-    const bottomImage = getVersionImage(1);
-    const topImage = getVersionImage(currentPage.versions.length);
+    const bottomImage = getVersionImage(overlayBaseVersion);
+    const topImage = getVersionImage(overlayTopVersion);
     
     return (
       <div className="flex-1 flex flex-col min-w-0">
         <div className="flex items-center justify-between px-4 py-2 bg-white border-b border-gray-200">
           <span className="text-xs font-semibold px-2 py-1 rounded-full text-primary-700 bg-primary-100">
-            叠加对比 - V1 (底层) / V{currentPage.versions.length} (顶层)
+            叠加对比 - V{overlayBaseVersion} (底层) / V{overlayTopVersion} (顶层)
           </span>
           <span className="text-xs text-gray-500">
             不透明度: {overlayOpacity}%

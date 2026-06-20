@@ -17,6 +17,7 @@ export type LogActionType =
   | 'issue_status_changed'
   | 'version_uploaded'
   | 'issue_verified'
+  | 'issue_rejected'
   | 'chapter_status_changed'
   | 'issue_deleted'
   | 'issue_updated';
@@ -50,6 +51,9 @@ export interface IssueVersion {
   status: IssueStatus;
   verifiedBy?: string;
   verifiedAt?: string;
+  rejectReason?: string;
+  rejectedBy?: string;
+  rejectedAt?: string;
 }
 
 export interface Issue {

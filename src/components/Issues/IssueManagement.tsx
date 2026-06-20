@@ -3,18 +3,20 @@ import {
   AlertCircle, Clock, RotateCcw, CheckCircle2, Eye, 
   Search, Filter, ChevronRight, MapPin, Upload,
   Download, MessageSquare, User, Calendar, ArrowRight,
-  Layers, GitCompare, FileImage, History, X, ChevronDown
+  Layers, GitCompare, FileImage, History, X, ChevronDown,
+  XCircle
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { IssueStatus, ISSUE_STATUS_LABELS, ISSUE_TYPE_CONFIGS } from '../../types';
 import { getIssueTypeLabel, getIssueTypeColor, getUserNameById, getUserRoleLabel } from '../../data/mockData';
+import RejectModal from '../Review/RejectModal';
 
 interface IssueManagementProps {
   onJumpToIssue: (chapterId: string, issueId: string) => void;
 }
 
 export default function IssueManagement({ onJumpToIssue }: IssueManagementProps) {
-  const { state, updateIssueStatus, jumpToIssue, uploadIssueVersion, verifyIssue } = useApp();
+  const { state, updateIssueStatus, jumpToIssue, uploadIssueVersion, verifyIssue, rejectIssue } = useApp();
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('open');
   const [typeFilter, setTypeFilter] = useState<string>('all');
@@ -23,6 +25,8 @@ export default function IssueManagement({ onJumpToIssue }: IssueManagementProps)
   const [overlayOpacity, setOverlayOpacity] = useState(50);
   const [uploadNote, setUploadNote] = useState('');
   const [showVersionHistory, setShowVersionHistory] = useState(false);
+  const [showRejectModal, setShowRejectModal] = useState(false);
+  const [rejectIssueId, setRejectIssueId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const allIssues = state.chapters.flatMap(chapter => 
@@ -68,6 +72,22 @@ export default function IssueManagement({ onJumpToIssue }: IssueManagementProps)
 
   const handleVerifyIssue = (chapterId: string, issueId: string) => {
     verifyIssue(chapterId, issueId);
+  };
+
+  const handleRejectIssue = (issueId: string) => {
+    setRejectIssueId(issueId);
+    setShowRejectModal(true);
+  };
+
+  const handleConfirmReject = (reason: string) => {
+    if (rejectIssueId) {
+      const issue = allIssues.find(i => i.id === rejectIssueId);
+      if (issue) {
+        rejectIssue(issue.chapterId, issue.id, reason);
+      }
+    }
+    setShowRejectModal(false);
+    setRejectIssueId(null);
   };
 
   const formatDate = (dateStr: string) => {
@@ -564,6 +584,20 @@ export default function IssueManagement({ onJumpToIssue }: IssueManagementProps)
                                           )}
                                         </div>
                                       )}
+                                      {version.status === 'revising' && version.rejectedBy && (
+                                        <div className="mt-1.5 flex items-start gap-2 text-xs text-red-600 bg-red-50 px-2 py-1.5 rounded">
+                                          <XCircle className="w-3 h-3 mt-0.5 flex-shrink-0" />
+                                          <div>
+                                            <p className="font-medium">打回修改 - {getUserNameById(version.rejectedBy)}</p>
+                                            {version.rejectedAt && (
+                                              <p className="text-red-500 text-[10px]">{formatDate(version.rejectedAt)}</p>
+                                            )}
+                                            {version.rejectReason && (
+                                              <p className="mt-1 text-red-700">{version.rejectReason}</p>
+                                            )}
+                                          </div>
+                                        </div>
+                                      )}
                                     </div>
                                   </div>
                                 ))}
@@ -639,13 +673,22 @@ export default function IssueManagement({ onJumpToIssue }: IssueManagementProps)
                         </div>
 
                         {issue.status === 'resolved' && (
-                          <button
-                            onClick={() => handleVerifyIssue(issue.chapterId, issue.id)}
-                            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 transition-colors"
-                          >
-                            <CheckCircle2 className="w-4 h-4" />
-                            验证通过
-                          </button>
+                          <div className="space-y-2">
+                            <button
+                              onClick={() => handleVerifyIssue(issue.chapterId, issue.id)}
+                              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 transition-colors"
+                            >
+                              <CheckCircle2 className="w-4 h-4" />
+                              验证通过
+                            </button>
+                            <button
+                              onClick={() => handleRejectIssue(issue.id)}
+                              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-red-50 text-red-600 border border-red-200 rounded-lg text-sm font-medium hover:bg-red-100 transition-colors"
+                            >
+                              <XCircle className="w-4 h-4" />
+                              打回修改
+                            </button>
+                          </div>
                         )}
                       </div>
                     </div>
@@ -663,6 +706,22 @@ export default function IssueManagement({ onJumpToIssue }: IssueManagementProps)
           </div>
         </div>
       </div>
+
+      {showRejectModal && rejectIssueId && (
+        (() => {
+          const issue = allIssues.find(i => i.id === rejectIssueId);
+          return (
+            <RejectModal
+              onClose={() => {
+                setShowRejectModal(false);
+                setRejectIssueId(null);
+              }}
+              onConfirm={handleConfirmReject}
+              issueTitle={issue?.description || ''}
+            />
+          );
+        })()
+      )}
     </div>
   );
 }
