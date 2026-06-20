@@ -5,6 +5,7 @@ import { useApp } from '../../context/AppContext';
 interface AnnotationOverlayProps {
   issues: Issue[];
   activeIssueId: string | null;
+  highlightIssueId: string | null;
   zoomLevel: number;
   isAnnotating: boolean;
   pageWidth: number;
@@ -14,6 +15,7 @@ interface AnnotationOverlayProps {
 export default function AnnotationOverlay({
   issues,
   activeIssueId,
+  highlightIssueId,
   zoomLevel,
   isAnnotating,
   pageWidth,
@@ -24,6 +26,7 @@ export default function AnnotationOverlay({
 
   const handleIssueClick = (issueId: string) => {
     dispatch({ type: 'SET_ACTIVE_ISSUE', payload: issueId === activeIssueId ? null : issueId });
+    dispatch({ type: 'SET_HIGHLIGHT_ISSUE', payload: issueId === highlightIssueId ? null : issueId });
   };
 
   return (
@@ -37,6 +40,7 @@ export default function AnnotationOverlay({
     >
       {issues.map((issue, index) => {
         const isActive = issue.id === activeIssueId;
+        const isHighlighted = issue.id === highlightIssueId;
         const color = getIssueTypeColor(issue.type);
         const { x, y, width, height } = issue.annotation;
 
@@ -44,17 +48,20 @@ export default function AnnotationOverlay({
           <div
             key={issue.id}
             className={`absolute rounded-lg cursor-pointer transition-all duration-200 pointer-events-auto ${
-              isActive ? 'z-20' : 'z-10'
-            }`}
+              isActive || isHighlighted ? 'z-20' : 'z-10'
+            } ${isHighlighted ? 'animate-pulse' : ''}`}
             style={{
               left: x * scale,
               top: y * scale,
               width: width * scale,
               height: height * scale,
               border: `3px solid ${color}`,
-              backgroundColor: isActive ? `${color}30` : `${color}15`,
-              boxShadow: isActive ? `0 0 0 4px ${color}40, 0 8px 25px rgba(0,0,0,0.3)` : 'none',
-              transform: isActive ? 'scale(1.02)' : 'scale(1)'
+              backgroundColor: isActive || isHighlighted ? `${color}40` : `${color}15`,
+              boxShadow: isActive || isHighlighted 
+                ? `0 0 0 4px ${color}50, 0 0 20px ${color}60, 0 8px 25px rgba(0,0,0,0.3)` 
+                : 'none',
+              transform: isActive || isHighlighted ? 'scale(1.05)' : 'scale(1)',
+              animation: isHighlighted ? 'pulse 1.5s ease-in-out infinite' : 'none'
             }}
             onClick={(e) => {
               e.stopPropagation();

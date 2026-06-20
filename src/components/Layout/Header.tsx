@@ -1,9 +1,9 @@
-import { BookOpen, Bell, Settings, User, BarChart3, ListTodo } from 'lucide-react';
+import { BookOpen, Bell, Settings, User, BarChart3, ListTodo, ClipboardList } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 
 interface HeaderProps {
-  currentView: 'chapters' | 'review' | 'issues' | 'statistics';
-  onViewChange: (view: 'chapters' | 'review' | 'issues' | 'statistics') => void;
+  currentView: 'chapters' | 'review' | 'issues' | 'statistics' | 'logs';
+  onViewChange: (view: 'chapters' | 'review' | 'issues' | 'statistics' | 'logs') => void;
 }
 
 export default function Header({ currentView, onViewChange }: HeaderProps) {
@@ -13,6 +13,7 @@ export default function Header({ currentView, onViewChange }: HeaderProps) {
     { id: 'chapters', label: '章节列表', icon: ListTodo },
     { id: 'issues', label: '返修管理', icon: BookOpen },
     { id: 'statistics', label: '统计分析', icon: BarChart3 },
+    { id: 'logs', label: '操作日志', icon: ClipboardList },
   ];
 
   return (

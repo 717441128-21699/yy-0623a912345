@@ -12,6 +12,15 @@ export type IssueType =
 
 export type IssueStatus = 'open' | 'revising' | 'resolved' | 'verified';
 
+export type LogActionType = 
+  | 'issue_created'
+  | 'issue_status_changed'
+  | 'version_uploaded'
+  | 'issue_verified'
+  | 'chapter_status_changed'
+  | 'issue_deleted'
+  | 'issue_updated';
+
 export interface Annotation {
   id: string;
   x: number;
@@ -19,6 +28,26 @@ export interface Annotation {
   width: number;
   height: number;
   pageIndex: number;
+}
+
+export interface PageVersion {
+  version: number;
+  pageIndex: number;
+  imageUrl: string;
+  uploadedBy: string;
+  uploadedAt: string;
+  note?: string;
+  issueIds?: string[];
+}
+
+export interface IssueVersion {
+  version: number;
+  issueId: string;
+  imageUrl?: string;
+  uploadedBy: string;
+  uploadedAt: string;
+  note?: string;
+  status: IssueStatus;
 }
 
 export interface Issue {
@@ -36,7 +65,8 @@ export interface Issue {
   resolvedAt?: string;
   resolvedBy?: string;
   resolutionNote?: string;
-  version?: number;
+  currentVersion: number;
+  versions: IssueVersion[];
 }
 
 export interface Page {
@@ -45,6 +75,7 @@ export interface Page {
   translatedImage: string;
   width: number;
   height: number;
+  versions: PageVersion[];
 }
 
 export interface Chapter {
@@ -63,6 +94,27 @@ export interface Chapter {
   deadline?: string;
   issues: Issue[];
   currentVersion: number;
+}
+
+export interface OperationLog {
+  id: string;
+  timestamp: string;
+  action: LogActionType;
+  userId: string;
+  userName: string;
+  userRole: string;
+  chapterId: string;
+  chapterTitle: string;
+  issueId?: string;
+  pageIndex?: number;
+  details: {
+    description?: string;
+    oldStatus?: string;
+    newStatus?: string;
+    version?: number;
+    issueType?: string;
+    note?: string;
+  };
 }
 
 export interface User {

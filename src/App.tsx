@@ -1,42 +1,51 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
 import Header from './components/Layout/Header';
 import ChapterList from './components/Chapters/ChapterList';
 import ReviewPage from './components/Review/ReviewPage';
 import IssueManagement from './components/Issues/IssueManagement';
 import StatisticsPage from './components/Statistics/StatisticsPage';
+import OperationLog from './components/Logs/OperationLog';
 
 function AppContent() {
-  const { state, dispatch } = useApp();
-  const [currentView, setCurrentView] = useState<'chapters' | 'review' | 'issues' | 'statistics'>('chapters');
+  const { state, dispatch, jumpToIssue } = useApp();
+  const [currentView, setCurrentView] = useState<'chapters' | 'review' | 'issues' | 'statistics' | 'logs'>('chapters');
+  const [highlightIssueId, setHighlightIssueId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (state.selectedChapterId && currentView !== 'review') {
+      setCurrentView('review');
+    }
+  }, []);
 
   const handleSelectChapter = (chapterId: string) => {
     dispatch({ type: 'SELECT_CHAPTER', payload: chapterId });
+    setHighlightIssueId(null);
     setCurrentView('review');
   };
 
   const handleBackToList = () => {
     dispatch({ type: 'SELECT_CHAPTER', payload: null });
+    setHighlightIssueId(null);
     setCurrentView('chapters');
   };
 
-  const handleJumpToIssue = (chapterId: string, pageIndex: number, issueId: string) => {
+  const handleJumpToIssue = (chapterId: string, issueId: string) => {
     dispatch({ type: 'SELECT_CHAPTER', payload: chapterId });
-    dispatch({ type: 'SET_PAGE', payload: pageIndex });
-    dispatch({ type: 'SET_ACTIVE_ISSUE', payload: issueId });
+    setHighlightIssueId(issueId);
     setCurrentView('review');
   };
 
-  const handleViewChange = (view: 'chapters' | 'review' | 'issues' | 'statistics') => {
-    if (view === 'review' && !state.selectedChapterId) {
-      setCurrentView('chapters');
-      return;
-    }
-    if (view === 'review' && state.selectedChapterId) {
+  const handleViewChange = (view: 'chapters' | 'review' | 'issues' | 'statistics' | 'logs') => {
+    if (view === 'review') {
+      if (!state.selectedChapterId) {
+        setCurrentView('chapters');
+        return;
+      }
       setCurrentView('review');
       return;
     }
-    dispatch({ type: 'SELECT_CHAPTER', payload: null });
+    dispatch({ type: 'SET_HIGHLIGHT_ISSUE', payload: null });
     setCurrentView(view);
   };
 
@@ -48,13 +57,19 @@ function AppContent() {
           <ChapterList onSelectChapter={handleSelectChapter} />
         )}
         {currentView === 'review' && (
-          <ReviewPage onBack={handleBackToList} />
+          <ReviewPage 
+            onBack={handleBackToList} 
+            highlightIssueId={highlightIssueId || undefined}
+          />
         )}
         {currentView === 'issues' && (
           <IssueManagement onJumpToIssue={handleJumpToIssue} />
         )}
         {currentView === 'statistics' && (
           <StatisticsPage />
+        )}
+        {currentView === 'logs' && (
+          <OperationLog />
         )}
       </main>
     </div>

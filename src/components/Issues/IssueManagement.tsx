@@ -1,24 +1,29 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { 
   AlertCircle, Clock, RotateCcw, CheckCircle2, Eye, 
   Search, Filter, ChevronRight, MapPin, Upload,
-  Download, MessageSquare, User, Calendar, ArrowRight
+  Download, MessageSquare, User, Calendar, ArrowRight,
+  Layers, GitCompare, FileImage, History, X, ChevronDown
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { IssueStatus, ISSUE_STATUS_LABELS, ISSUE_TYPE_CONFIGS } from '../../types';
-import { getIssueTypeLabel, getIssueTypeColor } from '../../data/mockData';
+import { getIssueTypeLabel, getIssueTypeColor, getUserNameById, getUserRoleLabel } from '../../data/mockData';
 
 interface IssueManagementProps {
-  onJumpToIssue: (chapterId: string, pageIndex: number, issueId: string) => void;
+  onJumpToIssue: (chapterId: string, issueId: string) => void;
 }
 
 export default function IssueManagement({ onJumpToIssue }: IssueManagementProps) {
-  const { state, updateIssueStatus, jumpToIssue } = useApp();
+  const { state, updateIssueStatus, jumpToIssue, uploadIssueVersion, verifyIssue } = useApp();
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('open');
   const [typeFilter, setTypeFilter] = useState<string>('all');
-  const [assigneeFilter, setAssigneeFilter] = useState<string>('all');
   const [selectedIssue, setSelectedIssue] = useState<string | null>(null);
+  const [compareMode, setCompareMode] = useState<'none' | 'side' | 'overlay'>('none');
+  const [overlayOpacity, setOverlayOpacity] = useState(50);
+  const [uploadNote, setUploadNote] = useState('');
+  const [showVersionHistory, setShowVersionHistory] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const allIssues = state.chapters.flatMap(chapter => 
     chapter.issues.map(issue => ({ ...issue, chapterTitle: chapter.title, chapterId: chapter.id }))
@@ -41,11 +46,28 @@ export default function IssueManagement({ onJumpToIssue }: IssueManagementProps)
   }, {} as Record<string, typeof filteredIssues>);
 
   const handleJumpToIssue = (issue: typeof filteredIssues[0]) => {
-    jumpToIssue(issue);
+    onJumpToIssue(issue.chapterId, issue.id);
   };
 
   const handleStatusChange = (chapterId: string, issueId: string, status: IssueStatus, note?: string) => {
     updateIssueStatus(chapterId, issueId, status, note);
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, chapterId: string, issueId: string) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const imageUrl = event.target?.result as string;
+      uploadIssueVersion(chapterId, issueId, imageUrl, uploadNote || undefined);
+      setUploadNote('');
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleVerifyIssue = (chapterId: string, issueId: string) => {
+    verifyIssue(chapterId, issueId);
   };
 
   const formatDate = (dateStr: string) => {
@@ -59,6 +81,10 @@ export default function IssueManagement({ onJumpToIssue }: IssueManagementProps)
   };
 
   const getChapterById = (id: string) => state.chapters.find(ch => ch.id === id);
+  const getPageById = (chapterId: string, pageIndex: number) => {
+    const chapter = getChapterById(chapterId);
+    return chapter?.pages[pageIndex];
+  };
 
   const statusTabs = [
     { value: 'all', label: '全部', count: allIssues.length },
@@ -157,7 +183,7 @@ export default function IssueManagement({ onJumpToIssue }: IssueManagementProps)
                           第{chapter.chapterNumber}话 {chapter.title}
                         </h4>
                         <p className="text-xs text-gray-500">
-                          共 {issues.length} 个问题待处理
+                          共 {issues.length} 个问题
                         </p>
                       </div>
                       {issues.map((issue) => {
@@ -198,6 +224,11 @@ export default function IssueManagement({ onJumpToIssue }: IssueManagementProps)
                                   <span className="text-xs text-gray-400">
                                     第 {issue.pageIndex + 1} 页
                                   </span>
+                                  {issue.versions.length > 1 && (
+                                    <span className="text-xs text-primary-600 bg-primary-50 px-1.5 py-0.5 rounded">
+                                      V{issue.currentVersion}
+                                    </span>
+                                  )}
                                 </div>
                                 <p className="text-sm text-gray-800 line-clamp-2 mb-2">{issue.description}</p>
                                 <div className="flex items-center justify-between text-xs text-gray-400">
@@ -234,146 +265,345 @@ export default function IssueManagement({ onJumpToIssue }: IssueManagementProps)
                 const issue = filteredIssues.find(i => i.id === selectedIssue);
                 if (!issue) return null;
                 const chapter = getChapterById(issue.chapterId);
+                const page = getPageById(issue.chapterId, issue.pageIndex);
                 const typeColor = getIssueTypeColor(issue.type);
                 const StatusIcon = statusConfig[issue.status].icon;
+                const latestVersion = issue.versions[issue.versions.length - 1];
+                const firstVersion = issue.versions[0];
+                const hasVersions = issue.versions.length > 1;
 
                 return (
-                  <div className="p-6">
-                    <div className="bg-white rounded-xl border border-gray-200 p-6">
-                      <div className="flex items-center justify-between mb-4">
-                        <div className="flex items-center gap-2">
-                          <span
-                            className="text-sm font-medium px-3 py-1 rounded-full"
-                            style={{
-                              backgroundColor: typeColor + '20',
-                              color: typeColor
-                            }}
+                  <div className="p-4 space-y-4">
+                    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                      <div className="p-4 border-b border-gray-200">
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className="text-sm font-medium px-3 py-1 rounded-full"
+                              style={{
+                                backgroundColor: typeColor + '20',
+                                color: typeColor
+                              }}
+                            >
+                              {getIssueTypeLabel(issue.type)}
+                            </span>
+                            <span className={`flex items-center gap-1 text-sm px-3 py-1 rounded-full border ${statusConfig[issue.status].color}`}>
+                              <StatusIcon className="w-4 h-4" />
+                              {ISSUE_STATUS_LABELS[issue.status]}
+                            </span>
+                          </div>
+                          <button
+                            onClick={() => handleJumpToIssue(issue)}
+                            className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg text-sm font-medium hover:bg-primary-700 transition-colors"
                           >
-                            {getIssueTypeLabel(issue.type)}
-                          </span>
-                          <span className={`flex items-center gap-1 text-sm px-3 py-1 rounded-full border ${statusConfig[issue.status].color}`}>
-                            <StatusIcon className="w-4 h-4" />
-                            {ISSUE_STATUS_LABELS[issue.status]}
-                          </span>
+                            <MapPin className="w-4 h-4" />
+                            跳转到审稿页
+                          </button>
                         </div>
-                        <button
-                          onClick={() => handleJumpToIssue(issue)}
-                          className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg text-sm font-medium hover:bg-primary-700 transition-colors"
-                        >
-                          <MapPin className="w-4 h-4" />
-                          跳转到位置
-                        </button>
-                      </div>
 
-                      <h3 className="text-lg font-semibold text-gray-900 mb-2">问题详情</h3>
-                      <p className="text-gray-700 mb-4">{issue.description}</p>
+                        <h3 className="text-lg font-semibold text-gray-900 mb-2">问题详情</h3>
+                        <p className="text-gray-700 mb-3">{issue.description}</p>
 
-                      {issue.suggestion && (
-                        <div className="mb-4">
-                          <h4 className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
-                            <MessageSquare className="w-4 h-4" />
-                            修改建议
-                          </h4>
-                          <div className="p-4 bg-primary-50 rounded-lg border border-primary-100">
+                        {issue.suggestion && (
+                          <div className="p-3 bg-primary-50 rounded-lg border border-primary-100">
+                            <p className="text-sm font-medium text-primary-700 mb-1">修改建议</p>
                             <p className="text-sm text-gray-700">{issue.suggestion}</p>
                           </div>
-                        </div>
-                      )}
-
-                      <div className="grid grid-cols-2 gap-4 mb-6">
-                        <div className="p-3 bg-gray-50 rounded-lg">
-                          <span className="text-xs text-gray-500 block mb-1">所属章节</span>
-                          <span className="text-sm font-medium text-gray-900">{chapter?.title}</span>
-                        </div>
-                        <div className="p-3 bg-gray-50 rounded-lg">
-                          <span className="text-xs text-gray-500 block mb-1">页码</span>
-                          <span className="text-sm font-medium text-gray-900">第 {issue.pageIndex + 1} 页</span>
-                        </div>
-                        <div className="p-3 bg-gray-50 rounded-lg">
-                          <span className="text-xs text-gray-500 block mb-1 flex items-center gap-1">
-                            <User className="w-3 h-3" /> 创建人
-                          </span>
-                          <span className="text-sm font-medium text-gray-900">
-                            {state.currentUser.name}
-                          </span>
-                        </div>
-                        <div className="p-3 bg-gray-50 rounded-lg">
-                          <span className="text-xs text-gray-500 block mb-1 flex items-center gap-1">
-                            <Calendar className="w-3 h-3" /> 创建时间
-                          </span>
-                          <span className="text-sm font-medium text-gray-900">{formatDate(issue.createdAt)}</span>
-                        </div>
+                        )}
                       </div>
 
-                      <div className="mb-4">
-                        <h4 className="text-sm font-medium text-gray-700 mb-2">标注位置</h4>
-                        <div className="p-4 bg-gray-50 rounded-lg">
-                          <div className="grid grid-cols-4 gap-4 text-sm">
-                            <div>
-                              <span className="text-xs text-gray-500">X坐标</span>
-                              <p className="font-mono font-medium">{Math.round(issue.annotation.x)}</p>
-                            </div>
-                            <div>
-                              <span className="text-xs text-gray-500">Y坐标</span>
-                              <p className="font-mono font-medium">{Math.round(issue.annotation.y)}</p>
-                            </div>
-                            <div>
-                              <span className="text-xs text-gray-500">宽度</span>
-                              <p className="font-mono font-medium">{Math.round(issue.annotation.width)}</p>
-                            </div>
-                            <div>
-                              <span className="text-xs text-gray-500">高度</span>
-                              <p className="font-mono font-medium">{Math.round(issue.annotation.height)}</p>
+                      {page && (
+                        <div className="p-4 border-b border-gray-200 bg-gray-50">
+                          <div className="flex items-center justify-between mb-3">
+                            <h4 className="text-sm font-medium text-gray-700 flex items-center gap-2">
+                              <FileImage className="w-4 h-4" />
+                              版本对比
+                            </h4>
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => setCompareMode('none')}
+                                className={`px-2 py-1 text-xs rounded ${compareMode === 'none' ? 'bg-gray-200 text-gray-700' : 'text-gray-500 hover:bg-gray-100'}`}
+                              >
+                                关闭
+                              </button>
+                              <button
+                                onClick={() => setCompareMode('side')}
+                                className={`px-2 py-1 text-xs rounded flex items-center gap-1 ${compareMode === 'side' ? 'bg-primary-100 text-primary-700' : 'text-gray-500 hover:bg-gray-100'}`}
+                              >
+                                <GitCompare className="w-3 h-3" />
+                                左右
+                              </button>
+                              <button
+                                onClick={() => setCompareMode('overlay')}
+                                className={`px-2 py-1 text-xs rounded flex items-center gap-1 ${compareMode === 'overlay' ? 'bg-primary-100 text-primary-700' : 'text-gray-500 hover:bg-gray-100'}`}
+                              >
+                                <Layers className="w-3 h-3" />
+                                叠加
+                              </button>
                             </div>
                           </div>
-                        </div>
-                      </div>
 
-                      {issue.resolutionNote && (
-                        <div className="mb-4">
-                          <h4 className="text-sm font-medium text-gray-700 mb-2">修改说明</h4>
-                          <div className="p-4 bg-green-50 rounded-lg border border-green-100">
-                            <p className="text-sm text-gray-700">{issue.resolutionNote}</p>
-                          </div>
-                        </div>
-                      )}
-
-                      <div>
-                        <h4 className="text-sm font-medium text-gray-700 mb-3">更新状态</h4>
-                        <div className="grid grid-cols-2 gap-2">
-                          {(['open', 'revising', 'resolved', 'verified'] as IssueStatus[]).map((status) => (
-                            <button
-                              key={status}
-                              onClick={() => handleStatusChange(issue.chapterId, issue.id, status)}
-                              className={`p-3 rounded-lg border-2 text-left transition-all ${
-                                issue.status === status
-                                  ? 'border-primary-500 bg-primary-50'
-                                  : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
-                              }`}
-                            >
-                              <div className="flex items-center gap-2">
-                                {React.createElement(statusConfig[status].icon, { className: 'w-4 h-4', style: { color: getIssueTypeColor(issue.type) } })}
-                                <span className="text-sm font-medium text-gray-900">
-                                  {ISSUE_STATUS_LABELS[status]}
-                                </span>
+                          {compareMode === 'side' && hasVersions && (
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <p className="text-xs text-gray-500 mb-1 text-center">V1 - 原始版本</p>
+                                <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                                  <img
+                                    src={page.versions[0]?.imageUrl || page.translatedImage}
+                                    alt="原始版本"
+                                    className="w-full object-cover"
+                                    style={{ aspectRatio: '4/3' }}
+                                  />
+                                </div>
                               </div>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
+                              <div>
+                                <p className="text-xs text-gray-500 mb-1 text-center">
+                                  V{issue.currentVersion} - 当前版本
+                                </p>
+                                <div className="bg-white rounded-lg border border-primary-300 overflow-hidden ring-2 ring-primary-200">
+                                  <img
+                                    src={latestVersion?.imageUrl || page.translatedImage}
+                                    alt="当前版本"
+                                    className="w-full object-cover"
+                                    style={{ aspectRatio: '4/3' }}
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          )}
 
-                      <div className="mt-6 pt-4 border-t border-gray-200">
-                        <h4 className="text-sm font-medium text-gray-700 mb-3">上传修改版本</h4>
-                        <div className="flex gap-2">
-                          <button className="flex-1 flex items-center justify-center gap-2 px-4 py-3 border-2 border-dashed border-gray-300 rounded-lg text-sm text-gray-600 hover:border-primary-400 hover:text-primary-600 transition-colors">
-                            <Upload className="w-4 h-4" />
-                            上传修改后的图片
-                          </button>
-                          <button className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-100 rounded-lg text-sm text-gray-600 hover:bg-gray-200 transition-colors">
-                            <Download className="w-4 h-4" />
-                            下载原图
-                          </button>
+                          {compareMode === 'overlay' && hasVersions && (
+                            <div>
+                              <div className="flex items-center justify-center gap-2 mb-2">
+                                <span className="text-xs text-gray-500">不透明度:</span>
+                                <input
+                                  type="range"
+                                  min="0"
+                                  max="100"
+                                  value={overlayOpacity}
+                                  onChange={(e) => setOverlayOpacity(parseInt(e.target.value))}
+                                  className="w-32"
+                                />
+                                <span className="text-xs text-gray-600 w-10">{overlayOpacity}%</span>
+                              </div>
+                              <div className="relative bg-white rounded-lg border border-gray-200 overflow-hidden">
+                                <img
+                                  src={page.versions[0]?.imageUrl || page.translatedImage}
+                                  alt="底层"
+                                  className="w-full object-cover"
+                                  style={{ aspectRatio: '4/3' }}
+                                />
+                                <img
+                                  src={latestVersion?.imageUrl || page.translatedImage}
+                                  alt="顶层"
+                                  className="absolute top-0 left-0 w-full h-full object-cover transition-opacity"
+                                  style={{ opacity: overlayOpacity / 100 }}
+                                />
+                                <div
+                                  className="absolute inset-0 border-4 rounded-lg pointer-events-none"
+                                  style={{
+                                    borderColor: typeColor,
+                                    left: `${issue.annotation.x / 8}%`,
+                                    top: `${issue.annotation.y / 11.32}%`,
+                                    width: `${issue.annotation.width / 8}%`,
+                                    height: `${issue.annotation.height / 11.32}%`,
+                                    boxShadow: `0 0 0 9999px rgba(0,0,0,0.1)`
+                                  }}
+                                ></div>
+                              </div>
+                            </div>
+                          )}
+
+                          {compareMode === 'none' && (
+                            <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                              <img
+                                src={latestVersion?.imageUrl || page.translatedImage}
+                                alt="当前页面"
+                                className="w-full object-cover"
+                                style={{ aspectRatio: '4/3' }}
+                              />
+                              <div className="p-2 bg-gray-50 border-t border-gray-100">
+                                <p className="text-xs text-gray-500">
+                                  当前版本: V{issue.currentVersion} {latestVersion?.note && `- ${latestVersion.note}`}
+                                </p>
+                              </div>
+                            </div>
+                          )}
                         </div>
+                      )}
+
+                      <div className="p-4 space-y-4">
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="p-3 bg-gray-50 rounded-lg">
+                            <span className="text-xs text-gray-500 block mb-1">所属章节</span>
+                            <span className="text-sm font-medium text-gray-900">{chapter?.title}</span>
+                          </div>
+                          <div className="p-3 bg-gray-50 rounded-lg">
+                            <span className="text-xs text-gray-500 block mb-1">页码</span>
+                            <span className="text-sm font-medium text-gray-900">第 {issue.pageIndex + 1} 页</span>
+                          </div>
+                          <div className="p-3 bg-gray-50 rounded-lg">
+                            <span className="text-xs text-gray-500 block mb-1 flex items-center gap-1">
+                              <User className="w-3 h-3" /> 创建人
+                            </span>
+                            <span className="text-sm font-medium text-gray-900">
+                              {getUserNameById(issue.createdBy)}
+                            </span>
+                          </div>
+                          <div className="p-3 bg-gray-50 rounded-lg">
+                            <span className="text-xs text-gray-500 block mb-1 flex items-center gap-1">
+                              <Calendar className="w-3 h-3" /> 创建时间
+                            </span>
+                            <span className="text-sm font-medium text-gray-900">{formatDate(issue.createdAt)}</span>
+                          </div>
+                        </div>
+
+                        <div>
+                          <h4 className="text-sm font-medium text-gray-700 mb-2">标注位置</h4>
+                          <div className="p-3 bg-gray-50 rounded-lg">
+                            <div className="grid grid-cols-4 gap-2 text-sm">
+                              <div>
+                                <span className="text-xs text-gray-500">X坐标</span>
+                                <p className="font-mono font-medium">{Math.round(issue.annotation.x)}</p>
+                              </div>
+                              <div>
+                                <span className="text-xs text-gray-500">Y坐标</span>
+                                <p className="font-mono font-medium">{Math.round(issue.annotation.y)}</p>
+                              </div>
+                              <div>
+                                <span className="text-xs text-gray-500">宽度</span>
+                                <p className="font-mono font-medium">{Math.round(issue.annotation.width)}</p>
+                              </div>
+                              <div>
+                                <span className="text-xs text-gray-500">高度</span>
+                                <p className="font-mono font-medium">{Math.round(issue.annotation.height)}</p>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {hasVersions && (
+                          <div>
+                            <button
+                              onClick={() => setShowVersionHistory(!showVersionHistory)}
+                              className="flex items-center justify-between w-full p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
+                            >
+                              <span className="text-sm font-medium text-gray-700 flex items-center gap-2">
+                                <History className="w-4 h-4" />
+                                版本历史 ({issue.versions.length})
+                              </span>
+                              <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${showVersionHistory ? 'rotate-180' : ''}`} />
+                            </button>
+                            {showVersionHistory && (
+                              <div className="mt-2 space-y-2">
+                                {issue.versions.slice().reverse().map((version, idx) => (
+                                  <div key={version.version} className="flex items-start gap-3 p-3 bg-white rounded-lg border border-gray-100">
+                                    <div className="w-8 h-8 rounded-full bg-primary-100 flex items-center justify-center flex-shrink-0">
+                                      <span className="text-xs font-bold text-primary-700">V{version.version}</span>
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-center gap-2 mb-1">
+                                        <span className="text-sm font-medium text-gray-900">
+                                          版本 {version.version}
+                                        </span>
+                                        <span className={`text-xs px-1.5 py-0.5 rounded ${
+                                          version.status === 'verified' ? 'bg-green-100 text-green-700' :
+                                          version.status === 'resolved' ? 'bg-blue-100 text-blue-700' :
+                                          version.status === 'revising' ? 'bg-amber-100 text-amber-700' :
+                                          'bg-gray-100 text-gray-700'
+                                        }`}>
+                                          {ISSUE_STATUS_LABELS[version.status]}
+                                        </span>
+                                      </div>
+                                      <p className="text-xs text-gray-500">
+                                        {getUserNameById(version.uploadedBy)} · {formatDate(version.uploadedAt)}
+                                      </p>
+                                      {version.note && (
+                                        <p className="text-sm text-gray-600 mt-1">{version.note}</p>
+                                      )}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {issue.resolutionNote && (
+                          <div>
+                            <h4 className="text-sm font-medium text-gray-700 mb-2">修改说明</h4>
+                            <div className="p-3 bg-green-50 rounded-lg border border-green-100">
+                              <p className="text-sm text-gray-700">{issue.resolutionNote}</p>
+                            </div>
+                          </div>
+                        )}
+
+                        <div>
+                          <h4 className="text-sm font-medium text-gray-700 mb-3">更新状态</h4>
+                          <div className="grid grid-cols-2 gap-2">
+                            {(['open', 'revising', 'resolved', 'verified'] as IssueStatus[]).map((status) => (
+                              <button
+                                key={status}
+                                onClick={() => handleStatusChange(issue.chapterId, issue.id, status)}
+                                className={`p-3 rounded-lg border-2 text-left transition-all ${
+                                  issue.status === status
+                                    ? 'border-primary-500 bg-primary-50'
+                                    : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2">
+                                  {React.createElement(statusConfig[status].icon, { className: 'w-4 h-4', style: { color: typeColor } })}
+                                  <span className="text-sm font-medium text-gray-900">
+                                    {ISSUE_STATUS_LABELS[status]}
+                                  </span>
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="pt-4 border-t border-gray-200 space-y-3">
+                          <h4 className="text-sm font-medium text-gray-700">上传修改版本</h4>
+                          
+                          <textarea
+                            value={uploadNote}
+                            onChange={(e) => setUploadNote(e.target.value)}
+                            placeholder="修改说明（可选）"
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-none"
+                            rows={2}
+                          />
+
+                          <div className="flex gap-2">
+                            <input
+                              ref={fileInputRef}
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => handleFileUpload(e, issue.chapterId, issue.id)}
+                            />
+                            <button
+                              onClick={() => fileInputRef.current?.click()}
+                              className="flex-1 flex items-center justify-center gap-2 px-4 py-3 border-2 border-dashed border-gray-300 rounded-lg text-sm text-gray-600 hover:border-primary-400 hover:text-primary-600 transition-colors"
+                            >
+                              <Upload className="w-4 h-4" />
+                              上传修改后的图片
+                            </button>
+                            <button className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-100 rounded-lg text-sm text-gray-600 hover:bg-gray-200 transition-colors">
+                              <Download className="w-4 h-4" />
+                              下载原图
+                            </button>
+                          </div>
+                        </div>
+
+                        {issue.status === 'resolved' && (
+                          <button
+                            onClick={() => handleVerifyIssue(issue.chapterId, issue.id)}
+                            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 transition-colors"
+                          >
+                            <CheckCircle2 className="w-4 h-4" />
+                            验证通过
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>

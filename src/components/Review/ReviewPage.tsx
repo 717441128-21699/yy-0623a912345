@@ -1,31 +1,39 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { 
   ArrowLeft, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, 
   Edit3, Eye, CheckCircle, AlertTriangle, FileText,
-  Download, Upload, RotateCcw, List, Grid, X
+  Download, Upload, RotateCcw, List, Grid, X, Layers,
+  GitCompare, EyeOff
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { ISSUE_TYPE_CONFIGS, STATUS_LABELS, ISSUE_STATUS_LABELS } from '../../types';
-import { getIssueTypeLabel, getIssueTypeColor } from '../../data/mockData';
+import { STATUS_LABELS, ISSUE_STATUS_LABELS } from '../../types';
+import { getIssueTypeLabel } from '../../data/mockData';
 import DualImageView from './DualImageView';
 import IssuePanel from './IssuePanel';
-import AnnotationOverlay from './AnnotationOverlay';
 import IssueFormModal from './IssueFormModal';
 
 interface ReviewPageProps {
   onBack: () => void;
+  highlightIssueId?: string;
 }
 
-export default function ReviewPage({ onBack }: ReviewPageProps) {
-  const { state, dispatch, getSelectedChapter, getCurrentPage, getCurrentPageIssues, updateIssueStatus } = useApp();
+export default function ReviewPage({ onBack, highlightIssueId }: ReviewPageProps) {
+  const { state, dispatch, getSelectedChapter, getCurrentPage, getCurrentPageIssues, verifyIssue, jumpToIssue } = useApp();
   const [showIssuePanel, setShowIssuePanel] = useState(true);
   const [showIssueForm, setShowIssueForm] = useState(false);
-  const [viewMode, setViewMode] = useState<'dual' | 'original' | 'translated'>('dual');
   const [syncScroll, setSyncScroll] = useState(true);
 
   const chapter = getSelectedChapter();
   const currentPage = getCurrentPage();
   const pageIssues = getCurrentPageIssues();
+
+  useEffect(() => {
+    if (highlightIssueId && chapter) {
+      setTimeout(() => {
+        jumpToIssue(highlightIssueId, chapter.id);
+      }, 100);
+    }
+  }, [highlightIssueId, chapter?.id]);
 
   if (!chapter) {
     return (
@@ -48,6 +56,9 @@ export default function ReviewPage({ onBack }: ReviewPageProps) {
   const currentPageIssues = chapter.issues.filter(
     issue => issue.pageIndex === state.currentPageIndex
   );
+
+  const pageVersions = currentPage?.versions || [];
+  const hasMultipleVersions = pageVersions.length > 1;
 
   const handlePrevPage = () => {
     dispatch({ type: 'PREV_PAGE' });
@@ -78,6 +89,7 @@ export default function ReviewPage({ onBack }: ReviewPageProps) {
 
   const handlePageSelect = (index: number) => {
     dispatch({ type: 'SET_PAGE', payload: index });
+    dispatch({ type: 'SET_HIGHLIGHT_ISSUE', payload: null });
   };
 
   const handleApproveChapter = () => {
@@ -88,12 +100,30 @@ export default function ReviewPage({ onBack }: ReviewPageProps) {
     dispatch({ type: 'UPDATE_CHAPTER_STATUS', payload: { chapterId: chapter.id, status: 'revising' } });
   };
 
+  const handleViewModeChange = (mode: 'dual' | 'original' | 'translated' | 'overlay') => {
+    dispatch({ type: 'SET_VIEW_MODE', payload: mode });
+  };
+
+  const handleCompareVersion = (left: number, right: number) => {
+    dispatch({ type: 'SET_COMPARE_VERSION', payload: { left, right } });
+  };
+
+  const handleClearCompare = () => {
+    dispatch({ type: 'SET_COMPARE_VERSION', payload: null });
+    dispatch({ type: 'SET_VIEW_MODE', payload: 'dual' });
+  };
+
   const issueStats = {
     total: chapter.issues.length,
     open: chapter.issues.filter(i => i.status === 'open').length,
     revising: chapter.issues.filter(i => i.status === 'revising').length,
     resolved: chapter.issues.filter(i => i.status === 'resolved').length,
     verified: chapter.issues.filter(i => i.status === 'verified').length,
+  };
+
+  const getVersionImage = (versionNum: number): string => {
+    const version = pageVersions.find(v => v.version === versionNum);
+    return version?.imageUrl || currentPage?.translatedImage || '';
   };
 
   return (
@@ -119,39 +149,92 @@ export default function ReviewPage({ onBack }: ReviewPageProps) {
                 <span className="px-2 py-0.5 text-xs font-medium rounded-full border bg-blue-50 text-blue-700 border-blue-200">
                   {STATUS_LABELS[chapter.status]}
                 </span>
+                {state.compareVersion && (
+                  <>
+                    <span className="w-1 h-1 bg-gray-300 rounded-full"></span>
+                    <span className="text-primary-600 font-medium">
+                      版本对比: V{state.compareVersion.left} vs V{state.compareVersion.right}
+                    </span>
+                  </>
+                )}
               </div>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1 mr-4">
+            <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1 mr-2">
               <button
-                onClick={() => setViewMode('dual')}
+                onClick={() => handleViewModeChange('dual')}
                 className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
-                  viewMode === 'dual' ? 'bg-white shadow text-gray-900' : 'text-gray-600 hover:text-gray-900'
+                  state.viewMode === 'dual' ? 'bg-white shadow text-gray-900' : 'text-gray-600 hover:text-gray-900'
                 }`}
+                title="双图对照"
               >
                 <Grid className="w-4 h-4" />
               </button>
               <button
-                onClick={() => setViewMode('original')}
+                onClick={() => handleViewModeChange('original')}
                 className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
-                  viewMode === 'original' ? 'bg-white shadow text-gray-900' : 'text-gray-600 hover:text-gray-900'
+                  state.viewMode === 'original' ? 'bg-white shadow text-gray-900' : 'text-gray-600 hover:text-gray-900'
                 }`}
+                title="日文原图"
               >
                 <span className="text-xs font-bold">JP</span>
               </button>
               <button
-                onClick={() => setViewMode('translated')}
+                onClick={() => handleViewModeChange('translated')}
                 className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
-                  viewMode === 'translated' ? 'bg-white shadow text-gray-900' : 'text-gray-600 hover:text-gray-900'
+                  state.viewMode === 'translated' ? 'bg-white shadow text-gray-900' : 'text-gray-600 hover:text-gray-900'
                 }`}
+                title="中文嵌字"
               >
                 <span className="text-xs font-bold">CN</span>
               </button>
+              {hasMultipleVersions && (
+                <>
+                  <div className="w-px h-5 bg-gray-300 mx-1"></div>
+                  <button
+                    onClick={() => handleViewModeChange('overlay')}
+                    className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
+                      state.viewMode === 'overlay' ? 'bg-white shadow text-gray-900' : 'text-gray-600 hover:text-gray-900'
+                    }`}
+                    title="叠加对比"
+                  >
+                    <Layers className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (pageVersions.length >= 2) {
+                        handleCompareVersion(1, pageVersions[pageVersions.length - 1].version);
+                      }
+                    }}
+                    className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
+                      state.compareVersion ? 'bg-primary-100 text-primary-700' : 'text-gray-600 hover:text-gray-900'
+                    }`}
+                    title="版本对比"
+                  >
+                    <GitCompare className="w-4 h-4" />
+                  </button>
+                </>
+              )}
             </div>
 
-            <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1 mr-4">
+            {state.viewMode === 'overlay' && hasMultipleVersions && (
+              <div className="flex items-center gap-2 mr-4">
+                <span className="text-xs text-gray-500">透明度:</span>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={state.overlayOpacity}
+                  onChange={(e) => dispatch({ type: 'SET_OVERLAY_OPACITY', payload: parseInt(e.target.value) })}
+                  className="w-24 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                />
+                <span className="text-xs text-gray-600 w-10">{state.overlayOpacity}%</span>
+              </div>
+            )}
+
+            <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1 mr-2">
               <button
                 onClick={handleZoomOut}
                 className="p-2 hover:bg-white rounded-md transition-colors"
@@ -244,6 +327,28 @@ export default function ReviewPage({ onBack }: ReviewPageProps) {
               />
               <span className="text-sm text-gray-600">同步滚动</span>
             </label>
+
+            {hasMultipleVersions && (
+              <div className="flex items-center gap-2 ml-4">
+                <span className="text-xs text-gray-500">查看版本:</span>
+                <select
+                  value={state.compareVersion?.right || pageVersions[pageVersions.length - 1]?.version || 1}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value);
+                    if (state.compareVersion) {
+                      handleCompareVersion(state.compareVersion.left, v);
+                    }
+                  }}
+                  className="text-sm border border-gray-300 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                >
+                  {pageVersions.map(v => (
+                    <option key={v.version} value={v.version}>
+                      V{v.version} - {v.note || '版本'}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-3">
@@ -266,6 +371,16 @@ export default function ReviewPage({ onBack }: ReviewPageProps) {
               </span>
             </div>
 
+            {state.compareVersion && (
+              <button
+                onClick={handleClearCompare}
+                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 border border-gray-200 rounded-lg hover:bg-gray-200 transition-colors"
+              >
+                <EyeOff className="w-4 h-4" />
+                退出对比
+              </button>
+            )}
+
             <button
               onClick={handleSendToRevise}
               className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg hover:bg-amber-100 transition-colors"
@@ -287,13 +402,17 @@ export default function ReviewPage({ onBack }: ReviewPageProps) {
       <div className="flex-1 flex overflow-hidden">
         <div className={`flex-1 overflow-auto p-6 ${showIssuePanel ? 'mr-80' : ''}`}>
           <DualImageView
-            viewMode={viewMode}
+            viewMode={state.viewMode}
             syncScroll={syncScroll}
             currentPage={currentPage}
             zoomLevel={state.zoomLevel}
             isAnnotating={state.isAnnotating}
             issues={currentPageIssues}
             activeIssueId={state.activeIssueId}
+            highlightIssueId={state.highlightIssueId}
+            compareVersion={state.compareVersion}
+            overlayOpacity={state.overlayOpacity}
+            getVersionImage={getVersionImage}
           />
         </div>
 
