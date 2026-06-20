@@ -120,6 +120,9 @@ export interface OperationLog {
     version?: number;
     issueType?: string;
     note?: string;
+    isBatch?: boolean;
+    batchCount?: number;
+    batchIds?: string[];
   };
 }
 

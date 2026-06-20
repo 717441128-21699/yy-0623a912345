@@ -5,6 +5,7 @@ interface RejectModalProps {
   onClose: () => void;
   onConfirm: (reason: string) => void;
   issueTitle: string;
+  isBatch?: boolean;
 }
 
 const REJECT_REASONS = [
@@ -17,7 +18,7 @@ const REJECT_REASONS = [
   '其他'
 ];
 
-export default function RejectModal({ onClose, onConfirm, issueTitle }: RejectModalProps) {
+export default function RejectModal({ onClose, onConfirm, issueTitle, isBatch = false }: RejectModalProps) {
   const [reason, setReason] = useState('');
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null);
 
@@ -40,8 +41,12 @@ export default function RejectModal({ onClose, onConfirm, issueTitle }: RejectMo
               <XCircle className="w-5 h-5 text-red-600" />
             </div>
             <div>
-              <h3 className="text-lg font-semibold text-gray-900">打回修改</h3>
-              <p className="text-sm text-gray-500">请填写打回原因，让嵌字师知道问题所在</p>
+              <h3 className="text-lg font-semibold text-gray-900">
+                {isBatch ? '批量打回修改' : '打回修改'}
+              </h3>
+              <p className="text-sm text-gray-500">
+                {isBatch ? '请填写统一打回原因，所有选中问题将回到修改中' : '请填写打回原因，让嵌字师知道问题所在'}
+              </p>
             </div>
           </div>
           <button
@@ -113,7 +118,7 @@ export default function RejectModal({ onClose, onConfirm, issueTitle }: RejectMo
             className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             <XCircle className="w-4 h-4" />
-            确认打回
+            {isBatch ? '确认批量打回' : '确认打回'}
           </button>
         </div>
       </div>

@@ -3,7 +3,7 @@ import {
   ArrowLeft, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, 
   Edit3, Eye, CheckCircle, AlertTriangle, FileText,
   Download, Upload, RotateCcw, List, Grid, X, Layers,
-  GitCompare, EyeOff, XCircle
+  GitCompare, EyeOff, XCircle, Clock
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { STATUS_LABELS, ISSUE_STATUS_LABELS, ISSUE_TYPE_CONFIGS } from '../../types';
@@ -12,6 +12,7 @@ import DualImageView from './DualImageView';
 import IssuePanel from './IssuePanel';
 import IssueFormModal from './IssueFormModal';
 import RejectModal from './RejectModal';
+import ReviewTimeline from './ReviewTimeline';
 
 interface ReviewPageProps {
   onBack: () => void;
@@ -25,6 +26,7 @@ export default function ReviewPage({ onBack, highlightIssueId }: ReviewPageProps
   const [syncScroll, setSyncScroll] = useState(true);
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [rejectIssueId, setRejectIssueId] = useState<string | null>(null);
+  const [showTimeline, setShowTimeline] = useState(false);
 
   const chapter = getSelectedChapter();
   const currentPage = getCurrentPage();
@@ -179,6 +181,18 @@ export default function ReviewPage({ onBack, highlightIssueId }: ReviewPageProps
     }
     setShowRejectModal(false);
     setRejectIssueId(null);
+  };
+
+  const handleTimelineJump = (pageIndex: number, leftVersion: number, rightVersion: number, issueId?: string) => {
+    dispatch({ type: 'SET_PAGE', payload: pageIndex });
+    dispatch({ type: 'SET_COMPARE_VERSION', payload: { left: leftVersion, right: rightVersion } });
+    dispatch({ type: 'SET_VIEW_MODE', payload: 'dual' });
+    if (issueId) {
+      dispatch({ type: 'SET_ACTIVE_ISSUE', payload: issueId });
+      dispatch({ type: 'SET_HIGHLIGHT_ISSUE', payload: issueId });
+    } else {
+      dispatch({ type: 'SET_HIGHLIGHT_ISSUE', payload: null });
+    }
   };
 
   const issueStats = {
@@ -424,6 +438,18 @@ export default function ReviewPage({ onBack, highlightIssueId }: ReviewPageProps
                 </span>
               )}
             </button>
+
+            <button
+              onClick={() => setShowTimeline(!showTimeline)}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                showTimeline
+                  ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              <Clock className="w-4 h-4" />
+              复核时间线
+            </button>
           </div>
         </div>
 
@@ -552,7 +578,7 @@ export default function ReviewPage({ onBack, highlightIssueId }: ReviewPageProps
       </div>
 
       <div className="flex-1 flex overflow-hidden">
-        <div className={`flex-1 overflow-auto p-6 ${showIssuePanel ? 'mr-80' : ''}`}>
+        <div className={`flex-1 overflow-auto p-6 ${showIssuePanel ? 'mr-80' : ''} ${showTimeline ? 'mr-72' : ''}`}>
           <DualImageView
             viewMode={state.viewMode}
             syncScroll={syncScroll}
@@ -577,6 +603,16 @@ export default function ReviewPage({ onBack, highlightIssueId }: ReviewPageProps
             onJumpToPage={handlePageSelect}
             onClose={() => setShowIssuePanel(false)}
           />
+        )}
+
+        {showTimeline && chapter && (
+          <div className="w-72 flex-shrink-0">
+            <ReviewTimeline
+              chapter={chapter}
+              currentPageIndex={state.currentPageIndex}
+              onJumpTo={handleTimelineJump}
+            />
+          </div>
         )}
       </div>
 

@@ -3,20 +3,23 @@ import {
   Clock, AlertTriangle, CheckCircle2, Eye, Filter, Search,
   User, MapPin, ChevronRight, Calendar, ListChecks,
   FileText, ArrowRight, Users, SortAsc, SortDesc,
-  Layers, GitCompare, X, ChevronDown, RotateCcw
+  Layers, GitCompare, X, ChevronDown, RotateCcw,
+  XCircle
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { ISSUE_STATUS_LABELS, ISSUE_TYPE_CONFIGS } from '../../types';
 import { getIssueTypeLabel, getIssueTypeColor, getUserNameById } from '../../data/mockData';
+import RejectModal from './RejectModal';
 
 interface ReviewQueueProps {
   onJumpToIssue: (chapterId: string, issueId: string) => void;
 }
 
 type SortType = 'upload_desc' | 'upload_asc' | 'version_desc' | 'chapter';
+type DateFilterType = 'all' | 'today' | '7days' | 'custom';
 
 export default function ReviewQueue({ onJumpToIssue }: ReviewQueueProps) {
-  const { state, verifyIssue, rejectIssue } = useApp();
+  const { state, verifyIssue, rejectIssue, batchVerifyIssues, batchRejectIssues } = useApp();
   const [chapterFilter, setChapterFilter] = useState<string>('all');
   const [lettererFilter, setLettererFilter] = useState<string>('all');
   const [typeFilter, setTypeFilter] = useState<string>('all');
@@ -26,6 +29,10 @@ export default function ReviewQueue({ onJumpToIssue }: ReviewQueueProps) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
   const [reviewChecklistOpen, setReviewChecklistOpen] = useState(false);
+  const [dateFilter, setDateFilter] = useState<DateFilterType>('all');
+  const [customDateStart, setCustomDateStart] = useState('');
+  const [customDateEnd, setCustomDateEnd] = useState('');
+  const [showBatchReject, setShowBatchReject] = useState(false);
 
   const pendingIssues = useMemo(() => state.chapters.flatMap(chapter =>
     chapter.issues
@@ -41,6 +48,35 @@ export default function ReviewQueue({ onJumpToIssue }: ReviewQueueProps) {
         reviseCount: Math.max(0, issue.versions.length - 1)
       }))
   ), [state.chapters]);
+
+  const isDateInRange = (dateStr: string): boolean => {
+    if (dateFilter === 'all') return true;
+    const date = new Date(dateStr);
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    
+    switch (dateFilter) {
+      case 'today':
+        return date >= today;
+      case '7days': {
+        const sevenDaysAgo = new Date(today);
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+        return date >= sevenDaysAgo;
+      }
+      case 'custom': {
+        if (!customDateStart && !customDateEnd) return true;
+        if (customDateStart && date < new Date(customDateStart)) return false;
+        if (customDateEnd) {
+          const endDate = new Date(customDateEnd);
+          endDate.setDate(endDate.getDate() + 1);
+          if (date >= endDate) return false;
+        }
+        return true;
+      }
+      default:
+        return true;
+    }
+  };
 
   const filteredIssues = useMemo(() => {
     let result = [...pendingIssues];
@@ -60,6 +96,7 @@ export default function ReviewQueue({ onJumpToIssue }: ReviewQueueProps) {
     if (multipleReviseOnly) {
       result = result.filter(i => i.reviseCount >= 2);
     }
+    result = result.filter(i => i.latestVersion && isDateInRange(i.latestVersion.uploadedAt));
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       result = result.filter(i => 
@@ -86,7 +123,7 @@ export default function ReviewQueue({ onJumpToIssue }: ReviewQueueProps) {
     }
 
     return result;
-  }, [pendingIssues, chapterFilter, lettererFilter, typeFilter, overdueOnly, multipleReviseOnly, searchQuery, sortBy]);
+  }, [pendingIssues, chapterFilter, lettererFilter, typeFilter, overdueOnly, multipleReviseOnly, searchQuery, sortBy, dateFilter, customDateStart, customDateEnd]);
 
   const isOverdue = (deadline?: string) => {
     if (!deadline) return false;
@@ -118,12 +155,22 @@ export default function ReviewQueue({ onJumpToIssue }: ReviewQueueProps) {
   };
 
   const handleBatchVerify = () => {
-    filteredIssues.forEach(issue => {
-      if (selectedIds.has(issue.id)) {
-        verifyIssue(issue.chapterId, issue.id);
-      }
-    });
+    const items = filteredIssues
+      .filter(i => selectedIds.has(i.id))
+      .map(i => ({ chapterId: i.chapterId, issueId: i.id }));
+    batchVerifyIssues(items);
     setSelectedIds(new Set());
+    setReviewChecklistOpen(false);
+  };
+
+  const handleBatchReject = (reason: string) => {
+    const items = filteredIssues
+      .filter(i => selectedIds.has(i.id))
+      .map(i => ({ chapterId: i.chapterId, issueId: i.id }));
+    batchRejectIssues(items, reason);
+    setSelectedIds(new Set());
+    setShowBatchReject(false);
+    setReviewChecklistOpen(false);
   };
 
   const handleBatchJumpToReview = () => {
@@ -149,6 +196,13 @@ export default function ReviewQueue({ onJumpToIssue }: ReviewQueueProps) {
 
   const selectedIssues = filteredIssues.filter(i => selectedIds.has(i.id));
 
+  const dateFilterOptions: { value: DateFilterType; label: string }[] = [
+    { value: 'all', label: '全部时间' },
+    { value: 'today', label: '今天' },
+    { value: '7days', label: '近7天' },
+    { value: 'custom', label: '自定义' },
+  ];
+
   return (
     <div className="h-full flex flex-col bg-gray-100">
       <div className="bg-white border-b border-gray-200 px-6 py-4">
@@ -169,6 +223,9 @@ export default function ReviewQueue({ onJumpToIssue }: ReviewQueueProps) {
                   {multipleReviseCount} 项多次返修
                 </span>
               )}
+              <span className="text-sm font-normal px-3 py-1 rounded-full bg-gray-100 text-gray-700">
+                筛选后 {filteredIssues.length} 项
+              </span>
             </h2>
             <p className="text-gray-600 text-sm">汇总已上传修改版但尚未验证的问题，支持组合筛选和批量复核</p>
           </div>
@@ -189,6 +246,13 @@ export default function ReviewQueue({ onJumpToIssue }: ReviewQueueProps) {
                 >
                   <MapPin className="w-4 h-4" />
                   跳转首项
+                </button>
+                <button
+                  onClick={() => setShowBatchReject(true)}
+                  className="flex items-center gap-2 px-4 py-2 bg-orange-50 text-orange-700 border border-orange-200 rounded-lg text-sm font-medium hover:bg-orange-100 transition-colors"
+                >
+                  <XCircle className="w-4 h-4" />
+                  批量打回
                 </button>
                 <button
                   onClick={handleBatchVerify}
@@ -261,6 +325,37 @@ export default function ReviewQueue({ onJumpToIssue }: ReviewQueueProps) {
                 ))}
               </select>
             </div>
+
+            <div className="flex items-center gap-2">
+              <Calendar className="w-4 h-4 text-gray-400" />
+              <select
+                value={dateFilter}
+                onChange={(e) => setDateFilter(e.target.value as DateFilterType)}
+                className="border border-gray-300 rounded-lg text-sm px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+              >
+                {dateFilterOptions.map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
+
+            {dateFilter === 'custom' && (
+              <div className="flex items-center gap-2">
+                <input
+                  type="date"
+                  value={customDateStart}
+                  onChange={(e) => setCustomDateStart(e.target.value)}
+                  className="border border-gray-300 rounded-lg text-sm px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                />
+                <span className="text-gray-500 text-sm">至</span>
+                <input
+                  type="date"
+                  value={customDateEnd}
+                  onChange={(e) => setCustomDateEnd(e.target.value)}
+                  className="border border-gray-300 rounded-lg text-sm px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                />
+              </div>
+            )}
 
             <div className="flex items-center gap-2">
               <SortDesc className="w-4 h-4 text-gray-400" />
@@ -478,6 +573,11 @@ export default function ReviewQueue({ onJumpToIssue }: ReviewQueueProps) {
                           <span className="text-xs text-gray-500">
                             第{issue.chapterNumber}话 · 第{issue.pageIndex + 1}页 · V{issue.currentVersion}
                           </span>
+                          {issue.reviseCount >= 2 && (
+                            <span className="text-xs px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700">
+                              {issue.reviseCount}次返修
+                            </span>
+                          )}
                         </div>
                         <p className="text-sm text-gray-800 mb-2">{issue.description}</p>
                         <div className="flex items-center gap-4 text-xs text-gray-400">
@@ -517,6 +617,13 @@ export default function ReviewQueue({ onJumpToIssue }: ReviewQueueProps) {
                   关闭
                 </button>
                 <button
+                  onClick={() => setShowBatchReject(true)}
+                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-orange-700 bg-orange-50 border border-orange-200 rounded-lg hover:bg-orange-100 transition-colors"
+                >
+                  <XCircle className="w-4 h-4" />
+                  统一打回
+                </button>
+                <button
                   onClick={handleBatchVerify}
                   className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 transition-colors"
                 >
@@ -527,6 +634,15 @@ export default function ReviewQueue({ onJumpToIssue }: ReviewQueueProps) {
             </div>
           </div>
         </div>
+      )}
+
+      {(showBatchReject) && selectedIssues.length > 0 && (
+        <RejectModal
+          onClose={() => setShowBatchReject(false)}
+          onConfirm={handleBatchReject}
+          issueTitle={`批量打回 ${selectedIssues.length} 项问题`}
+          isBatch
+        />
       )}
     </div>
   );

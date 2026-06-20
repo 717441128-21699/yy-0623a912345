@@ -354,6 +354,8 @@ const AppContext = createContext<{
   ) => void;
   verifyIssue: (chapterId: string, issueId: string) => void;
   rejectIssue: (chapterId: string, issueId: string, rejectReason: string) => void;
+  batchVerifyIssues: (items: { chapterId: string; issueId: string }[]) => void;
+  batchRejectIssues: (items: { chapterId: string; issueId: string }[], rejectReason: string) => void;
   addLog: (log: Omit<OperationLog, 'id' | 'timestamp'>) => void;
   getIssueById: (chapterId: string, issueId: string) => Issue | undefined;
 } | null>(null);
@@ -570,10 +572,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const issue = getIssueById(chapterId, issueId);
     if (!issue) return;
 
+    const chapter = state.chapters.find(ch => ch.id === chapterId);
+    const page = chapter?.pages.find(p => p.index === issue.pageIndex);
+
     const now = new Date().toISOString();
-    const sortedVersions = [...issue.versions].sort((a, b) => a.version - b.version);
-    const maxVersion = sortedVersions.length > 0 ? sortedVersions[sortedVersions.length - 1].version : 0;
-    const newVersionNum = maxVersion + 1;
+
+    const sortedIssueVersions = [...issue.versions].sort((a, b) => a.version - b.version);
+    const maxIssueVersion = sortedIssueVersions.length > 0 ? sortedIssueVersions[sortedIssueVersions.length - 1].version : 0;
+
+    const sortedPageVersions = [...(page?.versions || [])].sort((a, b) => a.version - b.version);
+    const maxPageVersion = sortedPageVersions.length > 0 ? sortedPageVersions[sortedPageVersions.length - 1].version : 0;
+
+    const newVersionNum = Math.max(maxIssueVersion, maxPageVersion) + 1;
 
     const newVersion: IssueVersion = {
       version: newVersionNum,
@@ -585,6 +595,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       note
     };
 
+    const existingPageVersion = sortedPageVersions.find(v => v.version === newVersionNum);
+    const existingIssueIds = existingPageVersion?.issueIds || [];
+    const mergedIssueIds = [...new Set([...existingIssueIds, issueId])];
+
     const pageVersion: PageVersion = {
       version: newVersionNum,
       pageIndex: issue.pageIndex,
@@ -592,7 +606,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       uploadedBy: state.currentUser.id,
       uploadedAt: now,
       note: note || `问题 #${issueId} 修改版`,
-      issueIds: [issueId]
+      issueIds: mergedIssueIds
     };
 
     dispatch({
@@ -600,7 +614,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       payload: { chapterId, issueId, version: newVersion, pageIndex: issue.pageIndex, pageVersion }
     });
 
-    const chapter = state.chapters.find(ch => ch.id === chapterId);
     addLog({
       action: 'version_uploaded',
       userId: state.currentUser.id,
@@ -699,6 +712,58 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
   };
 
+  const batchVerifyIssues = (items: { chapterId: string; issueId: string }[]) => {
+    if (items.length === 0) return;
+
+    items.forEach(item => {
+      verifyIssue(item.chapterId, item.issueId);
+    });
+
+    const firstChapter = state.chapters.find(ch => ch.id === items[0].chapterId);
+    addLog({
+      action: 'issue_verified',
+      userId: state.currentUser.id,
+      userName: state.currentUser.name,
+      userRole: state.currentUser.role,
+      chapterId: items[0].chapterId,
+      chapterTitle: firstChapter?.title || '',
+      details: {
+        description: `批量验证通过 ${items.length} 项问题`,
+        newStatus: 'verified',
+        note: '批量操作',
+        isBatch: true,
+        batchCount: items.length,
+        batchIds: items.map(i => i.issueId)
+      }
+    });
+  };
+
+  const batchRejectIssues = (items: { chapterId: string; issueId: string }[], rejectReason: string) => {
+    if (items.length === 0) return;
+
+    items.forEach(item => {
+      rejectIssue(item.chapterId, item.issueId, rejectReason);
+    });
+
+    const firstChapter = state.chapters.find(ch => ch.id === items[0].chapterId);
+    addLog({
+      action: 'issue_rejected',
+      userId: state.currentUser.id,
+      userName: state.currentUser.name,
+      userRole: state.currentUser.role,
+      chapterId: items[0].chapterId,
+      chapterTitle: firstChapter?.title || '',
+      details: {
+        description: `批量打回 ${items.length} 项问题：${rejectReason}`,
+        newStatus: 'revising',
+        note: '批量打回',
+        isBatch: true,
+        batchCount: items.length,
+        batchIds: items.map(i => i.issueId)
+      }
+    });
+  };
+
   return (
     <AppContext.Provider value={{
       state,
@@ -713,6 +778,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       uploadIssueVersion,
       verifyIssue,
       rejectIssue,
+      batchVerifyIssues,
+      batchRejectIssues,
       addLog,
       getIssueById
     }}>
