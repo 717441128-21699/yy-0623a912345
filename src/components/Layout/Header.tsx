@@ -1,17 +1,24 @@
-import { BookOpen, Bell, Settings, User, BarChart3, ListTodo, ClipboardList } from 'lucide-react';
+import { BookOpen, Bell, Settings, User, BarChart3, ListTodo, ClipboardList, ListChecks } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 
+type ViewType = 'chapters' | 'review' | 'issues' | 'statistics' | 'logs' | 'reviewQueue';
+
 interface HeaderProps {
-  currentView: 'chapters' | 'review' | 'issues' | 'statistics' | 'logs';
-  onViewChange: (view: 'chapters' | 'review' | 'issues' | 'statistics' | 'logs') => void;
+  currentView: ViewType;
+  onViewChange: (view: ViewType) => void;
 }
 
 export default function Header({ currentView, onViewChange }: HeaderProps) {
   const { state } = useApp();
 
+  const pendingReviewCount = state.chapters.reduce((acc, ch) => {
+    return acc + ch.issues.filter(i => i.status === 'resolved').length;
+  }, 0);
+
   const navItems = [
     { id: 'chapters', label: '章节列表', icon: ListTodo },
     { id: 'issues', label: '返修管理', icon: BookOpen },
+    { id: 'reviewQueue', label: '待复核', icon: ListChecks, badge: pendingReviewCount },
     { id: 'statistics', label: '统计分析', icon: BarChart3 },
     { id: 'logs', label: '操作日志', icon: ClipboardList },
   ];
@@ -33,7 +40,7 @@ export default function Header({ currentView, onViewChange }: HeaderProps) {
           {navItems.map((item) => (
             <button
               key={item.id}
-              onClick={() => onViewChange(item.id as any)}
+              onClick={() => onViewChange(item.id as ViewType)}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                 currentView === item.id
                   ? 'bg-primary-50 text-primary-700'
@@ -42,6 +49,11 @@ export default function Header({ currentView, onViewChange }: HeaderProps) {
             >
               <item.icon className="w-4 h-4" />
               {item.label}
+              {item.badge && item.badge > 0 ? (
+                <span className="px-1.5 py-0.5 text-xs bg-red-500 text-white rounded-full leading-none">
+                  {item.badge}
+                </span>
+              ) : null}
             </button>
           ))}
         </nav>
@@ -49,7 +61,9 @@ export default function Header({ currentView, onViewChange }: HeaderProps) {
         <div className="flex items-center gap-4">
           <button className="relative p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors">
             <Bell className="w-5 h-5" />
-            <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
+            {pendingReviewCount > 0 && (
+              <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
+            )}
           </button>
           <button className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors">
             <Settings className="w-5 h-5" />

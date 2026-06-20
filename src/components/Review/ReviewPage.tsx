@@ -18,7 +18,7 @@ interface ReviewPageProps {
 }
 
 export default function ReviewPage({ onBack, highlightIssueId }: ReviewPageProps) {
-  const { state, dispatch, getSelectedChapter, getCurrentPage, getCurrentPageIssues, verifyIssue, jumpToIssue } = useApp();
+  const { state, dispatch, getSelectedChapter, getCurrentPage, getCurrentPageIssues, verifyIssue, jumpToIssue, updateChapterStatus } = useApp();
   const [showIssuePanel, setShowIssuePanel] = useState(true);
   const [showIssueForm, setShowIssueForm] = useState(false);
   const [syncScroll, setSyncScroll] = useState(true);
@@ -93,11 +93,11 @@ export default function ReviewPage({ onBack, highlightIssueId }: ReviewPageProps
   };
 
   const handleApproveChapter = () => {
-    dispatch({ type: 'UPDATE_CHAPTER_STATUS', payload: { chapterId: chapter.id, status: 'approved' } });
+    updateChapterStatus(chapter.id, 'approved');
   };
 
   const handleSendToRevise = () => {
-    dispatch({ type: 'UPDATE_CHAPTER_STATUS', payload: { chapterId: chapter.id, status: 'revising' } });
+    updateChapterStatus(chapter.id, 'revising');
   };
 
   const handleViewModeChange = (mode: 'dual' | 'original' | 'translated' | 'overlay') => {

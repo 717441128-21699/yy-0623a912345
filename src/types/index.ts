@@ -48,6 +48,8 @@ export interface IssueVersion {
   uploadedAt: string;
   note?: string;
   status: IssueStatus;
+  verifiedBy?: string;
+  verifiedAt?: string;
 }
 
 export interface Issue {

@@ -6,10 +6,13 @@ import ReviewPage from './components/Review/ReviewPage';
 import IssueManagement from './components/Issues/IssueManagement';
 import StatisticsPage from './components/Statistics/StatisticsPage';
 import OperationLog from './components/Logs/OperationLog';
+import ReviewQueue from './components/Review/ReviewQueue';
+
+type ViewType = 'chapters' | 'review' | 'issues' | 'statistics' | 'logs' | 'reviewQueue';
 
 function AppContent() {
   const { state, dispatch, jumpToIssue } = useApp();
-  const [currentView, setCurrentView] = useState<'chapters' | 'review' | 'issues' | 'statistics' | 'logs'>('chapters');
+  const [currentView, setCurrentView] = useState<ViewType>('chapters');
   const [highlightIssueId, setHighlightIssueId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -36,7 +39,7 @@ function AppContent() {
     setCurrentView('review');
   };
 
-  const handleViewChange = (view: 'chapters' | 'review' | 'issues' | 'statistics' | 'logs') => {
+  const handleViewChange = (view: ViewType) => {
     if (view === 'review') {
       if (!state.selectedChapterId) {
         setCurrentView('chapters');
@@ -64,6 +67,9 @@ function AppContent() {
         )}
         {currentView === 'issues' && (
           <IssueManagement onJumpToIssue={handleJumpToIssue} />
+        )}
+        {currentView === 'reviewQueue' && (
+          <ReviewQueue onJumpToIssue={handleJumpToIssue} />
         )}
         {currentView === 'statistics' && (
           <StatisticsPage />

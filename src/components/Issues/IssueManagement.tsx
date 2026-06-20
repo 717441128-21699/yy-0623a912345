@@ -456,6 +456,33 @@ export default function IssueManagement({ onJumpToIssue }: IssueManagementProps)
                             </span>
                             <span className="text-sm font-medium text-gray-900">{formatDate(issue.createdAt)}</span>
                           </div>
+                          <div className="p-3 bg-primary-50 rounded-lg border border-primary-100">
+                            <span className="text-xs text-primary-600 block mb-1">当前版本</span>
+                            <span className="text-sm font-medium text-gray-900">
+                              V{issue.currentVersion}
+                              {latestVersion?.note && ` - ${latestVersion.note}`}
+                            </span>
+                          </div>
+                          {issue.status === 'verified' && issue.resolvedBy && (
+                            <div className="p-3 bg-green-50 rounded-lg border border-green-100">
+                              <span className="text-xs text-green-600 block mb-1">验证信息</span>
+                              <span className="text-sm font-medium text-gray-900">
+                                {getUserNameById(issue.resolvedBy)} 验证通过
+                              </span>
+                              {issue.resolvedAt && (
+                                <p className="text-xs text-green-600 mt-0.5">{formatDate(issue.resolvedAt)}</p>
+                              )}
+                            </div>
+                          )}
+                          {issue.status === 'resolved' && latestVersion && (
+                            <div className="p-3 bg-blue-50 rounded-lg border border-blue-100">
+                              <span className="text-xs text-blue-600 block mb-1">修改信息</span>
+                              <span className="text-sm font-medium text-gray-900">
+                                {getUserNameById(latestVersion.uploadedBy)} 上传修改
+                              </span>
+                              <p className="text-xs text-blue-600 mt-0.5">{formatDate(latestVersion.uploadedAt)}</p>
+                            </div>
+                          )}
                         </div>
 
                         <div>
@@ -498,8 +525,12 @@ export default function IssueManagement({ onJumpToIssue }: IssueManagementProps)
                               <div className="mt-2 space-y-2">
                                 {issue.versions.slice().reverse().map((version, idx) => (
                                   <div key={version.version} className="flex items-start gap-3 p-3 bg-white rounded-lg border border-gray-100">
-                                    <div className="w-8 h-8 rounded-full bg-primary-100 flex items-center justify-center flex-shrink-0">
-                                      <span className="text-xs font-bold text-primary-700">V{version.version}</span>
+                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
+                                      version.status === 'verified' ? 'bg-green-100' : 'bg-primary-100'
+                                    }`}>
+                                      <span className={`text-xs font-bold ${
+                                        version.status === 'verified' ? 'text-green-700' : 'text-primary-700'
+                                      }`}>V{version.version}</span>
                                     </div>
                                     <div className="flex-1 min-w-0">
                                       <div className="flex items-center gap-2 mb-1">
@@ -514,12 +545,24 @@ export default function IssueManagement({ onJumpToIssue }: IssueManagementProps)
                                         }`}>
                                           {ISSUE_STATUS_LABELS[version.status]}
                                         </span>
+                                        {version === issue.versions[issue.versions.length - 1] && (
+                                          <span className="text-xs px-1.5 py-0.5 rounded bg-primary-50 text-primary-600">当前版本</span>
+                                        )}
                                       </div>
                                       <p className="text-xs text-gray-500">
-                                        {getUserNameById(version.uploadedBy)} · {formatDate(version.uploadedAt)}
+                                        {getUserNameById(version.uploadedBy)} 上传 · {formatDate(version.uploadedAt)}
                                       </p>
                                       {version.note && (
                                         <p className="text-sm text-gray-600 mt-1">{version.note}</p>
+                                      )}
+                                      {version.status === 'verified' && version.verifiedBy && (
+                                        <div className="mt-1.5 flex items-center gap-2 text-xs text-green-600 bg-green-50 px-2 py-1 rounded">
+                                          <CheckCircle2 className="w-3 h-3" />
+                                          <span>由 {getUserNameById(version.verifiedBy)} 验证通过</span>
+                                          {version.verifiedAt && (
+                                            <span className="text-green-500">· {formatDate(version.verifiedAt)}</span>
+                                          )}
+                                        </div>
                                       )}
                                     </div>
                                   </div>

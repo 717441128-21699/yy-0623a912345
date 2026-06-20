@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useReducer, useEffect, ReactNode } from 'react';
 import { Chapter, Issue, User, IssueType, Annotation, IssueStatus, OperationLog, IssueVersion, PageVersion } from '../types';
 import { mockChapters, getCurrentUser, generateMockLogs } from '../data/mockData';
+import { STATUS_LABELS } from '../types';
 
 const STORAGE_KEY_CHAPTERS = 'manga_review_chapters';
 const STORAGE_KEY_LOGS = 'manga_review_logs';
@@ -39,8 +40,8 @@ type Action =
   | { type: 'UPDATE_ISSUE'; payload: { chapterId: string; issueId: string; updates: Partial<Issue> } }
   | { type: 'UPDATE_CHAPTER_STATUS'; payload: { chapterId: string; status: Chapter['status'] } }
   | { type: 'DELETE_ISSUE'; payload: { chapterId: string; issueId: string } }
-  | { type: 'ADD_ISSUE_VERSION'; payload: { chapterId: string; issueId: string; version: IssueVersion } }
-  | { type: 'ADD_PAGE_VERSION'; payload: { chapterId: string; pageIndex: number; version: PageVersion } }
+  | { type: 'ADD_ISSUE_VERSION'; payload: { chapterId: string; issueId: string; version: IssueVersion; pageIndex: number; pageVersion: PageVersion } }
+  | { type: 'VERIFY_ISSUE_VERSION'; payload: { chapterId: string; issueId: string; versionIndex: number; verifiedBy: string; verifiedAt: string } }
   | { type: 'ADD_LOG'; payload: OperationLog }
   | { type: 'LOAD_FROM_STORAGE'; payload: { chapters: Chapter[]; logs: OperationLog[] } }
   | { type: 'NEXT_PAGE' }
@@ -182,53 +183,74 @@ function appReducer(state: AppState, action: Action): AppState {
         )
       };
       break;
-    case 'ADD_ISSUE_VERSION':
+    case 'ADD_ISSUE_VERSION': {
+      const { chapterId, issueId, version, pageIndex, pageVersion } = action.payload;
       newState = {
         ...state,
         chapters: state.chapters.map(ch =>
-          ch.id === action.payload.chapterId
+          ch.id === chapterId
             ? {
                 ...ch,
                 issues: ch.issues.map(issue =>
-                  issue.id === action.payload.issueId
+                  issue.id === issueId
                     ? {
                         ...issue,
-                        versions: [...issue.versions, action.payload.version],
-                        currentVersion: action.payload.version.version,
-                        status: action.payload.version.status,
-                        updatedAt: action.payload.version.uploadedAt
+                        versions: [...issue.versions, version],
+                        currentVersion: version.version,
+                        status: version.status,
                       }
                     : issue
                 ),
-                updatedAt: new Date().toISOString()
-              }
-            : ch
-        )
-      };
-      break;
-    case 'ADD_PAGE_VERSION':
-      newState = {
-        ...state,
-        chapters: state.chapters.map(ch =>
-          ch.id === action.payload.chapterId
-            ? {
-                ...ch,
                 pages: ch.pages.map(page =>
-                  page.index === action.payload.pageIndex
+                  page.index === pageIndex
                     ? {
                         ...page,
-                        versions: [...page.versions, action.payload.version],
-                        translatedImage: action.payload.version.imageUrl
+                        versions: [...page.versions, pageVersion],
+                        translatedImage: pageVersion.imageUrl
                       }
                     : page
                 ),
-                currentVersion: action.payload.version.version,
                 updatedAt: new Date().toISOString()
               }
             : ch
         )
       };
       break;
+    }
+    case 'VERIFY_ISSUE_VERSION': {
+      const { chapterId: vChId, issueId: vIssueId, versionIndex, verifiedBy, verifiedAt } = action.payload;
+      newState = {
+        ...state,
+        chapters: state.chapters.map(ch =>
+          ch.id === vChId
+            ? {
+                ...ch,
+                issues: ch.issues.map(issue => {
+                  if (issue.id !== vIssueId) return issue;
+                  const newVersions = [...issue.versions];
+                  if (newVersions[versionIndex]) {
+                    newVersions[versionIndex] = {
+                      ...newVersions[versionIndex],
+                      status: 'verified',
+                      verifiedBy,
+                      verifiedAt
+                    };
+                  }
+                  return {
+                    ...issue,
+                    versions: newVersions,
+                    status: 'verified' as IssueStatus,
+                    resolvedAt: verifiedAt,
+                    resolvedBy: verifiedBy
+                  };
+                }),
+                updatedAt: new Date().toISOString()
+              }
+            : ch
+        )
+      };
+      break;
+    }
     case 'ADD_LOG':
       newState = {
         ...state,
@@ -276,6 +298,7 @@ const AppContext = createContext<{
     suggestion: string
   ) => void;
   updateIssueStatus: (chapterId: string, issueId: string, status: IssueStatus, resolutionNote?: string) => void;
+  updateChapterStatus: (chapterId: string, newStatus: Chapter['status']) => void;
   jumpToIssue: (issueId: string, chapterId?: string) => void;
   uploadIssueVersion: (
     chapterId: string,
@@ -338,6 +361,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const getIssueById = (chapterId: string, issueId: string) => {
     const chapter = state.chapters.find(ch => ch.id === chapterId);
     return chapter?.issues.find(issue => issue.id === issueId);
+  };
+
+  const addLog = (log: Omit<OperationLog, 'id' | 'timestamp'>) => {
+    const newLog: OperationLog = {
+      ...log,
+      id: `log-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      timestamp: new Date().toISOString()
+    };
+    dispatch({ type: 'ADD_LOG', payload: newLog });
   };
 
   const createIssue = (
@@ -432,6 +464,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
   };
 
+  const updateChapterStatus = (chapterId: string, newStatus: Chapter['status']) => {
+    const chapter = state.chapters.find(ch => ch.id === chapterId);
+    if (!chapter) return;
+
+    const oldStatus = chapter.status;
+    dispatch({ type: 'UPDATE_CHAPTER_STATUS', payload: { chapterId, status: newStatus } });
+
+    addLog({
+      action: 'chapter_status_changed',
+      userId: state.currentUser.id,
+      userName: state.currentUser.name,
+      userRole: state.currentUser.role,
+      chapterId,
+      chapterTitle: chapter.title,
+      details: {
+        oldStatus: STATUS_LABELS[oldStatus],
+        newStatus: STATUS_LABELS[newStatus],
+        description: `将第${chapter.chapterNumber}话「${chapter.title}」从${STATUS_LABELS[oldStatus]}变更为${STATUS_LABELS[newStatus]}`
+      }
+    });
+  };
+
   const jumpToIssue = (issueId: string, chapterId?: string) => {
     const targetChapterId = chapterId || state.selectedChapterId;
     if (!targetChapterId) return;
@@ -444,6 +498,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       dispatch({ type: 'SET_PAGE', payload: issue.pageIndex });
       dispatch({ type: 'SET_ACTIVE_ISSUE', payload: issueId });
       dispatch({ type: 'SET_HIGHLIGHT_ISSUE', payload: issueId });
+      if (issue.versions.length > 1) {
+        dispatch({ type: 'SET_COMPARE_VERSION', payload: { left: 1, right: issue.currentVersion } });
+      }
     }, 50);
   };
 
@@ -456,17 +513,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const issue = getIssueById(chapterId, issueId);
     if (!issue) return;
 
+    const now = new Date().toISOString();
+    const newVersionNum = issue.currentVersion + 1;
+
     const newVersion: IssueVersion = {
-      version: issue.currentVersion + 1,
+      version: newVersionNum,
       issueId,
       imageUrl,
       uploadedBy: state.currentUser.id,
-      uploadedAt: new Date().toISOString(),
+      uploadedAt: now,
       status: 'resolved',
       note
     };
 
-    dispatch({ type: 'ADD_ISSUE_VERSION', payload: { chapterId, issueId, version: newVersion } });
+    const pageVersion: PageVersion = {
+      version: newVersionNum,
+      pageIndex: issue.pageIndex,
+      imageUrl,
+      uploadedBy: state.currentUser.id,
+      uploadedAt: now,
+      note: note || `问题 #${issueId} 修改版`,
+      issueIds: [issueId]
+    };
+
+    dispatch({
+      type: 'ADD_ISSUE_VERSION',
+      payload: { chapterId, issueId, version: newVersion, pageIndex: issue.pageIndex, pageVersion }
+    });
 
     const chapter = state.chapters.find(ch => ch.id === chapterId);
     addLog({
@@ -479,7 +552,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       issueId,
       pageIndex: issue.pageIndex,
       details: {
-        version: newVersion.version,
+        version: newVersionNum,
         description: note,
         oldStatus: issue.status,
         newStatus: 'resolved'
@@ -489,18 +562,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const verifyIssue = (chapterId: string, issueId: string) => {
     const issue = getIssueById(chapterId, issueId);
-    const oldStatus = issue?.status;
+    if (!issue) return;
+
+    const oldStatus = issue.status;
+    const now = new Date().toISOString();
+    const lastVersionIndex = issue.versions.length - 1;
 
     dispatch({
-      type: 'UPDATE_ISSUE',
+      type: 'VERIFY_ISSUE_VERSION',
       payload: {
         chapterId,
         issueId,
-        updates: {
-          status: 'verified',
-          resolvedAt: new Date().toISOString(),
-          resolvedBy: state.currentUser.id
-        }
+        versionIndex: lastVersionIndex,
+        verifiedBy: state.currentUser.id,
+        verifiedAt: now
       }
     });
 
@@ -513,22 +588,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       chapterId,
       chapterTitle: chapter?.title || '',
       issueId,
-      pageIndex: issue?.pageIndex,
+      pageIndex: issue.pageIndex,
       details: {
         oldStatus,
         newStatus: 'verified',
+        version: issue.currentVersion,
         description: '验证通过'
       }
     });
-  };
-
-  const addLog = (log: Omit<OperationLog, 'id' | 'timestamp'>) => {
-    const newLog: OperationLog = {
-      ...log,
-      id: `log-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      timestamp: new Date().toISOString()
-    };
-    dispatch({ type: 'ADD_LOG', payload: newLog });
   };
 
   return (
@@ -540,6 +607,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       getCurrentPageIssues,
       createIssue,
       updateIssueStatus,
+      updateChapterStatus,
       jumpToIssue,
       uploadIssueVersion,
       verifyIssue,
